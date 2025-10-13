@@ -8,6 +8,7 @@ use services::mmb::lastfm::{LASTFM_API_KEY, LASTFM_API_SECRET};
 use smol_macros::main;
 
 mod config;
+mod db;
 mod devices;
 mod library;
 mod media;
@@ -15,7 +16,6 @@ mod modules;
 mod playback;
 mod services;
 mod settings;
-mod shared;
 mod ui;
 mod util;
 

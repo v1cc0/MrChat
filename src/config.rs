@@ -17,7 +17,7 @@ pub struct ChatSection {
     pub default_model: String,
     #[serde(default = "default_chat_endpoint")]
     pub api_endpoint: String,
-    #[serde(default)]
+    #[serde(default, alias = "api_key", alias = "api_api_key")]
     pub api_key: Option<String>,
     #[serde(default = "default_max_context")]
     pub max_context_tokens: u32,
@@ -25,7 +25,7 @@ pub struct ChatSection {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlayerSection {
-    #[serde(default)]
+    #[serde(default = "default_scan_directories")]
     pub scan_directories: Vec<String>,
     #[serde(default = "default_resume_playback")]
     pub resume_playback: bool,
@@ -154,6 +154,10 @@ fn default_chat_endpoint() -> String {
 
 fn default_max_context() -> u32 {
     8192
+}
+
+fn default_scan_directories() -> Vec<String> {
+    Vec::new()
 }
 
 fn default_resume_playback() -> bool {

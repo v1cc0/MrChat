@@ -9,7 +9,7 @@ use anyhow::Result;
 use gpui::App;
 use tracing::error;
 
-use crate::{config::ChatSection, shared::db::TursoPool};
+use crate::{config::ChatSection, db::TursoDatabase};
 
 use self::{
     models::{ChatState, ConversationId, LlmRequestState},
@@ -19,13 +19,13 @@ use self::{
 
 /// High level entry point for chat functionality.
 pub struct ChatFacade {
-    db: Arc<TursoPool>,
+    db: Arc<TursoDatabase>,
     chat_config: ChatSection,
     api_key: Option<String>,
 }
 
 impl ChatFacade {
-    pub fn new(db: Arc<TursoPool>, chat_config: ChatSection, api_key: Option<String>) -> Self {
+    pub fn new(db: Arc<TursoDatabase>, chat_config: ChatSection, api_key: Option<String>) -> Self {
         Self {
             db,
             chat_config,
@@ -33,7 +33,7 @@ impl ChatFacade {
         }
     }
 
-    pub fn db(&self) -> Arc<TursoPool> {
+    pub fn db(&self) -> Arc<TursoDatabase> {
         Arc::clone(&self.db)
     }
 
@@ -52,7 +52,7 @@ impl ChatFacade {
 
 /// Bootstrap helper used when we only have configuration yet.
 pub async fn init_from_pool(
-    pool: TursoPool,
+    pool: TursoDatabase,
     chat_config: ChatSection,
     api_key: Option<String>,
 ) -> Result<ChatFacade> {

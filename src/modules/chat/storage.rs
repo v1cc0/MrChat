@@ -4,9 +4,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use libsql::Row;
+use turso::Row;
 
-use crate::shared::db::{TursoConnection, TursoPool};
+use crate::db::{TursoConnection, TursoDatabase};
 
 use super::models::{ConversationId, ConversationSummary, Message, MessageRole};
 
@@ -34,28 +34,28 @@ CREATE TABLE IF NOT EXISTS messages (
 /// Data access object for chat domain entities using Turso.
 #[derive(Clone)]
 pub struct ChatDao {
-    pool: Arc<TursoPool>,
+    pool: Arc<TursoDatabase>,
 }
 
 impl ChatDao {
-    pub fn new(pool: Arc<TursoPool>) -> Self {
+    pub fn new(pool: Arc<TursoDatabase>) -> Self {
         Self { pool }
     }
 
-    async fn connection(&self) -> Result<TursoConnection> {
-        self.pool.connection()
+    fn connection(&self) -> Result<TursoConnection> {
+        self.pool.connect()
     }
 
     /// Ensure the minimal schema required by the chat module exists.
     pub async fn ensure_schema(&self) -> Result<()> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         conn.execute(DDL_CONVERSATIONS, ()).await?;
         conn.execute(DDL_MESSAGES, ()).await?;
         Ok(())
     }
 
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(
                 r#"
@@ -79,7 +79,7 @@ impl ChatDao {
         &self,
         id: &ConversationId,
     ) -> Result<Option<ConversationSummary>> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(
                 r#"
@@ -105,7 +105,7 @@ impl ChatDao {
         model_id: &str,
         timestamp: SystemTime,
     ) -> Result<ConversationSummary> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         let ts = to_millis(timestamp);
         conn.execute(
             r#"
@@ -130,7 +130,7 @@ impl ChatDao {
         title: &str,
         timestamp: SystemTime,
     ) -> Result<()> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         conn.execute(
             r#"
             UPDATE conversations
@@ -144,7 +144,7 @@ impl ChatDao {
     }
 
     pub async fn delete_conversation(&self, id: &ConversationId) -> Result<()> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         conn.execute(
             r#"DELETE FROM conversations WHERE id = ?1"#,
             [id.0.as_str()],
@@ -154,7 +154,7 @@ impl ChatDao {
     }
 
     pub async fn list_messages(&self, conversation_id: &ConversationId) -> Result<Vec<Message>> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         let mut rows = conn
             .query(
                 r#"
@@ -176,7 +176,7 @@ impl ChatDao {
     }
 
     pub async fn append_message(&self, message: &Message) -> Result<()> {
-        let conn = self.connection().await?;
+        let conn = self.connection()?;
         conn.execute(
             r#"
             INSERT INTO messages (id, conversation_id, role, content, created_at, token_usage)

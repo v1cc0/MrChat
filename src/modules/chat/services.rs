@@ -2,10 +2,10 @@ use std::{sync::Arc, time::SystemTime};
 
 use anyhow::{Context, Result, bail};
 use gpui::Global;
-use isahc::{AsyncReadResponseExt, prelude::*};
+use isahc::AsyncReadResponseExt;
 use serde_json::json;
 
-use crate::{config::ChatSection, shared::db::TursoPool};
+use crate::{config::ChatSection, db::TursoDatabase};
 
 use super::{
     models::{ConversationId, ConversationSummary, Message, MessageRole},
@@ -15,14 +15,14 @@ use super::{
 /// Container for chat-related service objects.
 #[derive(Clone)]
 pub struct ChatServices {
-    db: Arc<TursoPool>,
+    db: Arc<TursoDatabase>,
     dao: ChatDao,
     chat_config: ChatSection,
     api_key: Option<String>,
 }
 
 impl ChatServices {
-    pub fn new(db: Arc<TursoPool>, chat_config: ChatSection, api_key: Option<String>) -> Self {
+    pub fn new(db: Arc<TursoDatabase>, chat_config: ChatSection, api_key: Option<String>) -> Self {
         let dao = ChatDao::new(db.clone());
         let api_key = chat_config
             .api_key
@@ -38,7 +38,7 @@ impl ChatServices {
         }
     }
 
-    pub fn pool(&self) -> Arc<TursoPool> {
+    pub fn pool(&self) -> Arc<TursoDatabase> {
         self.db.clone()
     }
 
@@ -200,7 +200,7 @@ impl ChatServices {
     pub async fn ping(&self) -> Result<()> {
         // Ensure schema exists, then run a minimal query to confirm connectivity.
         self.ensure_schema().await?;
-        let conn = self.db.connection()?;
+        let conn = self.db.connect()?;
         conn.query("SELECT 1", ()).await?;
         Ok(())
     }

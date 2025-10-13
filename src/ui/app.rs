@@ -1,6 +1,7 @@
 use core::panic;
 use std::{
     fs,
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -12,6 +13,7 @@ use tracing::{debug, warn};
 
 use crate::{
     config::{AppConfig, AppConfigGlobal},
+    db::TursoDatabase,
     library::{
         db::create_pool,
         scan::{ScanInterface, ScanThread},
@@ -23,7 +25,6 @@ use crate::{
         SettingsGlobal, setup_settings,
         storage::{Storage, StorageData},
     },
-    shared::db::{TursoConfig, TursoPool},
     ui::{assets::HummingbirdAssetSource, constants::APP_SHADOW_SIZE},
 };
 
@@ -355,16 +356,20 @@ pub async fn run() {
     let app_config = AppConfig::load(&config_path);
     let app_config = Arc::new(app_config);
 
-    let turso_pool = match TursoConfig::from_sources(Some(&app_config.turso)) {
-        Ok(config) => match TursoPool::connect(config).await {
-            Ok(pool) => Some(Arc::new(pool)),
-            Err(err) => {
-                warn!("chat module disabled: failed to connect to Turso ({err:?})");
-                None
-            }
-        },
+    let chat_db_path = app_config
+        .turso
+        .database_url
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| directory.join("chat.db"));
+
+    let turso_pool = match TursoDatabase::open_local(&chat_db_path).await {
+        Ok(db) => Some(Arc::new(db)),
         Err(err) => {
-            warn!("chat module disabled: Turso configuration missing ({err:?})");
+            warn!(
+                "chat module disabled: unable to open Turso database {:?} ({err:?})",
+                chat_db_path
+            );
             None
         }
     };
