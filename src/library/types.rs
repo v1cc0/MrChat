@@ -3,28 +3,40 @@ pub mod table;
 
 use std::{path::PathBuf, sync::Arc};
 
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use gpui::{IntoElement, RenderImage, SharedString};
 use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
-use sqlx::{Database, Decode, Sqlite, Type, encode::IsNull, error::BoxDynError};
 
 use crate::util::rgb_to_bgr;
 
-#[derive(sqlx::FromRow)]
 pub struct Artist {
     pub id: i64,
     pub name: Option<DBString>,
     pub name_sortable: Option<String>,
-    #[sqlx(default)]
     pub bio: Option<DBString>,
     pub created_at: DateTime<Utc>,
-    #[sqlx(default)]
     pub image: Option<Box<[u8]>>,
-    #[sqlx(default)]
     pub image_mime: Option<DBString>,
-    #[sqlx(skip)]
     pub tags: Option<Vec<String>>,
+}
+
+impl Artist {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            name: row.get::<Option<String>>(1).context("failed to get name")?.map(DBString::from),
+            name_sortable: row.get(2).context("failed to get name_sortable")?,
+            bio: row.get::<Option<String>>(3).context("failed to get bio")?.map(DBString::from),
+            created_at: row.get::<String>(4).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            image: row.get::<Option<Vec<u8>>>(5).context("failed to get image")?
+                .map(|v| v.into_boxed_slice()),
+            image_mime: row.get::<Option<String>>(6).context("failed to get image_mime")?.map(DBString::from),
+            tags: None,
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -56,31 +68,9 @@ impl From<Box<[u8]>> for Thumbnail {
     }
 }
 
-impl<'r, DB: Database> Decode<'r, DB> for Thumbnail
-where
-    Box<[u8]>: Decode<'r, DB>,
-{
-    fn decode(value: <DB as Database>::ValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let data = <Box<[u8]>>::decode(value)?;
-        Ok(Self::from(data))
-    }
-}
-
-impl<'q, DB: Database> sqlx::Encode<'q, DB> for Thumbnail
-where
-    Box<[u8]>: sqlx::Encode<'q, DB>,
-{
-    fn encode_by_ref(
-        &self,
-        _: &mut <DB as Database>::ArgumentBuffer<'q>,
-    ) -> Result<IsNull, BoxDynError> {
-        panic!("Thumbnail is write-only")
-    }
-}
-
-impl sqlx::Type<sqlx::Sqlite> for Thumbnail {
-    fn type_info() -> <Sqlite as Database>::TypeInfo {
-        <Box<[u8]>>::type_info()
+impl From<Vec<u8>> for Thumbnail {
+    fn from(data: Vec<u8>) -> Self {
+        Self::from(data.into_boxed_slice())
     }
 }
 
@@ -155,109 +145,142 @@ impl IntoElement for DBString {
     }
 }
 
-impl<'q, DB: Database> sqlx::Encode<'q, DB> for DBString
-where
-    String: sqlx::Encode<'q, DB>,
-{
-    fn encode_by_ref(
-        &self,
-        out: &mut <DB as Database>::ArgumentBuffer<'q>,
-    ) -> Result<IsNull, BoxDynError> {
-        let string = self.0.to_string();
-        <String>::encode_by_ref(&string, out)
-    }
-}
-
-impl<'r, DB: Database> Decode<'r, DB> for DBString
-where
-    String: Decode<'r, DB>,
-{
-    fn decode(value: <DB as Database>::ValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
-        let data = String::decode(value)?;
-        Ok(Self::from(data))
-    }
-}
-
-impl sqlx::Type<sqlx::Sqlite> for DBString {
-    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
-        <String as Type<Sqlite>>::type_info()
-    }
-}
-
-#[derive(sqlx::FromRow, Clone)]
+#[derive(Clone)]
 pub struct Album {
     pub id: i64,
     pub title: DBString,
     pub title_sortable: DBString,
     pub artist_id: i64,
-    #[sqlx(default)]
     pub release_date: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
-    #[sqlx(default)]
     pub image: Option<Box<[u8]>>,
-    #[sqlx(default)]
     pub thumb: Option<Thumbnail>,
-    #[sqlx(default)]
     pub image_mime: Option<String>,
-    #[sqlx(skip)]
     pub tags: Option<Vec<String>>,
-    #[sqlx(default)]
     pub label: Option<DBString>,
-    #[sqlx(default)]
     pub catalog_number: Option<DBString>,
-    #[sqlx(default)]
     pub isrc: Option<DBString>,
 }
 
-#[derive(sqlx::FromRow, Clone, Debug)]
+impl Album {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            title: DBString::from(row.get::<String>(1).context("failed to get title")?),
+            title_sortable: DBString::from(row.get::<String>(2).context("failed to get title_sortable")?),
+            artist_id: row.get(3).context("failed to get artist_id")?,
+            release_date: row.get::<Option<String>>(4).context("failed to get release_date")?
+                .and_then(|s| s.parse().ok()),
+            created_at: row.get::<String>(5).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            image: row.get::<Option<Vec<u8>>>(6).context("failed to get image")?
+                .map(|v| v.into_boxed_slice()),
+            thumb: row.get::<Option<Vec<u8>>>(7).context("failed to get thumb")?.map(Thumbnail::from),
+            image_mime: row.get(8).context("failed to get image_mime")?,
+            tags: None,
+            label: row.get::<Option<String>>(9).context("failed to get label")?.map(DBString::from),
+            catalog_number: row.get::<Option<String>>(10).context("failed to get catalog_number")?.map(DBString::from),
+            isrc: row.get::<Option<String>>(11).context("failed to get isrc")?.map(DBString::from),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Track {
     pub id: i64,
     pub title: DBString,
     pub title_sortable: DBString,
-    #[sqlx(default)]
     pub album_id: Option<i64>,
-    #[sqlx(default)]
     pub track_number: Option<i32>,
-    #[sqlx(default)]
     pub disc_number: Option<i32>,
     pub duration: i64,
     pub created_at: DateTime<Utc>,
-    #[sqlx(skip)]
     pub genres: Option<Vec<DBString>>,
-    #[sqlx(skip)]
     pub tags: Option<Vec<DBString>>,
-    #[sqlx(try_from = "String")]
     pub location: PathBuf,
     pub artist_names: Option<DBString>,
 }
 
-#[derive(sqlx::Type, Clone, Copy, Debug, PartialEq)]
+impl Track {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            title: DBString::from(row.get::<String>(1).context("failed to get title")?),
+            title_sortable: DBString::from(row.get::<String>(2).context("failed to get title_sortable")?),
+            album_id: row.get(3).context("failed to get album_id")?,
+            track_number: row.get(4).context("failed to get track_number")?,
+            disc_number: row.get(5).context("failed to get disc_number")?,
+            duration: row.get(6).context("failed to get duration")?,
+            created_at: row.get::<String>(7).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            genres: None,
+            tags: None,
+            location: PathBuf::from(row.get::<String>(8).context("failed to get location")?),
+            artist_names: row.get::<Option<String>>(9).context("failed to get artist_names")?.map(DBString::from),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(i32)]
 pub enum PlaylistType {
     User = 0,
     System = 1,
 }
 
-#[derive(sqlx::FromRow, Clone)]
+impl PlaylistType {
+    pub fn from_i32(value: i32) -> Result<Self> {
+        match value {
+            0 => Ok(Self::User),
+            1 => Ok(Self::System),
+            _ => Err(anyhow::anyhow!("invalid playlist type: {}", value)),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Playlist {
     pub id: i64,
     pub name: DBString,
     pub created_at: DateTime<Utc>,
-    #[sqlx(rename = "type")]
     pub playlist_type: PlaylistType,
 }
 
-#[derive(sqlx::FromRow, Clone)]
+impl Playlist {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            name: DBString::from(row.get::<String>(1).context("failed to get name")?),
+            created_at: row.get::<String>(2).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            playlist_type: PlaylistType::from_i32(row.get(3).context("failed to get type")?)?,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct PlaylistWithCount {
     pub id: i64,
     pub name: DBString,
     pub created_at: DateTime<Utc>,
-    #[sqlx(rename = "type")]
     pub playlist_type: PlaylistType,
     pub track_count: i64,
 }
 
-#[derive(sqlx::FromRow, Clone)]
+impl PlaylistWithCount {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            name: DBString::from(row.get::<String>(1).context("failed to get name")?),
+            created_at: row.get::<String>(2).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            playlist_type: PlaylistType::from_i32(row.get(3).context("failed to get type")?)?,
+            track_count: row.get(4).context("failed to get track_count")?,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct PlaylistItem {
     pub id: i64,
     pub playlist_id: i64,
@@ -266,8 +289,30 @@ pub struct PlaylistItem {
     pub position: i64,
 }
 
-#[derive(sqlx::FromRow, Clone)]
+impl PlaylistItem {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            id: row.get(0).context("failed to get id")?,
+            playlist_id: row.get(1).context("failed to get playlist_id")?,
+            track_id: row.get(2).context("failed to get track_id")?,
+            created_at: row.get::<String>(3).context("failed to get created_at")?
+                .parse().context("failed to parse created_at")?,
+            position: row.get(4).context("failed to get position")?,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct TrackStats {
     pub track_count: i64,
     pub total_duration: i64,
+}
+
+impl TrackStats {
+    pub fn from_row(row: &turso::Row) -> Result<Self> {
+        Ok(Self {
+            track_count: row.get(0).context("failed to get track_count")?,
+            total_duration: row.get(1).context("failed to get total_duration")?,
+        })
+    }
 }

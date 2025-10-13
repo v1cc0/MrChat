@@ -4,7 +4,9 @@ use anyhow::{Context, Result};
 use std::fs;
 
 use turso::{Connection, Database, params::IntoParams};
+use turso_core::types::FromValue;
 
+#[derive(Clone)]
 pub struct TursoDatabase {
     inner: Database,
 }
@@ -100,5 +102,73 @@ impl TursoConnection {
             buffer.push(f(&row)?);
         }
         Ok(buffer)
+    }
+
+    pub async fn query_one<T, F>(
+        &self,
+        sql: &str,
+        params: impl IntoParams,
+        f: F,
+    ) -> Result<T>
+    where
+        F: FnOnce(&turso::Row) -> Result<T>,
+    {
+        let mut rows = self.query(sql, params).await?;
+        let row = rows
+            .next()
+            .await
+            .context("failed to fetch row")?
+            .context("no rows returned")?;
+        f(&row)
+    }
+
+    pub async fn query_optional<T, F>(
+        &self,
+        sql: &str,
+        params: impl IntoParams,
+        f: F,
+    ) -> Result<Option<T>>
+    where
+        F: FnOnce(&turso::Row) -> Result<T>,
+    {
+        let mut rows = self.query(sql, params).await?;
+        match rows.next().await.context("failed to fetch row")? {
+            Some(row) => Ok(Some(f(&row)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn query_scalar<T>(&self, sql: &str, params: impl IntoParams) -> Result<T>
+    where
+        T: FromValue,
+    {
+        let mut rows = self.query(sql, params).await?;
+        let row = rows
+            .next()
+            .await
+            .context("failed to fetch row")?
+            .context("no rows returned")?;
+        row.get(0).context("failed to get column 0")
+    }
+
+    pub async fn query_scalar_optional<T>(
+        &self,
+        sql: &str,
+        params: impl IntoParams,
+    ) -> Result<Option<T>>
+    where
+        T: FromValue,
+    {
+        let mut rows = self.query(sql, params).await?;
+        match rows.next().await.context("failed to fetch row")? {
+            Some(row) => Ok(Some(row.get(0).context("failed to get column 0")?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Execute a query and return the last inserted row ID
+    pub async fn execute_returning_id(&self, sql: &str, params: impl IntoParams) -> Result<i64> {
+        self.execute(sql, params).await?;
+        self.query_scalar::<i64>("SELECT last_insert_rowid()", ()).await
     }
 }

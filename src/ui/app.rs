@@ -8,14 +8,12 @@ use std::{
 use directories::ProjectDirs;
 use gpui::*;
 use prelude::FluentBuilder;
-use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
 use crate::{
     config::{AppConfig, AppConfigGlobal},
     db::TursoDatabase,
     library::{
-        db::create_pool,
         scan::{ScanInterface, ScanThread},
     },
     modules::chat::{self, services::ChatServices, ui::layout::ChatOverview},
@@ -315,7 +313,7 @@ pub fn find_fonts(cx: &mut App) -> gpui::Result<()> {
     results
 }
 
-pub struct Pool(pub SqlitePool);
+pub struct Pool(pub TursoDatabase);
 
 impl Global for Pool {}
 
@@ -342,61 +340,45 @@ pub async fn run() {
         fs::create_dir_all(&directory)
             .unwrap_or_else(|e| panic!("couldn't create data directory, {:?}, {:?}", directory, e));
     }
-    let file = directory.join("library.db");
 
-    let pool_result = create_pool(file).await;
-    let Ok(pool) = pool_result else {
-        panic!(
-            "fatal: unable to create database pool: {:?}",
-            pool_result.unwrap_err()
-        );
+    // Use a single Turso database for both library and chat
+    let db_path = directory.join("app.db");
+    let db = match TursoDatabase::open_local(&db_path).await {
+        Ok(db) => db,
+        Err(err) => panic!("fatal: unable to open Turso database {:?}: {:?}", db_path, err),
     };
+
+    // Run migrations for library schema
+    if let Err(err) = db.run_migrations("./migrations").await {
+        warn!("failed to run library migrations: {:?}", err);
+    }
 
     let config_path = directory.join("config.toml");
     let app_config = AppConfig::load(&config_path);
     let app_config = Arc::new(app_config);
 
-    let chat_db_path = app_config
-        .turso
-        .database_url
-        .clone()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| directory.join("chat.db"));
-
-    let turso_pool = match TursoDatabase::open_local(&chat_db_path).await {
-        Ok(db) => Some(Arc::new(db)),
-        Err(err) => {
-            warn!(
-                "chat module disabled: unable to open Turso database {:?} ({err:?})",
-                chat_db_path
-            );
-            None
-        }
-    };
-
-    let chat_pool = turso_pool.clone();
+    let db_for_chat = Arc::new(db.clone());
     let app_config_for_closure = app_config.clone();
 
     Application::new()
-        .with_assets(HummingbirdAssetSource::new(pool.clone()))
+        .with_assets(HummingbirdAssetSource::new(db.clone()))
         .run(move |cx: &mut App| {
             cx.set_global(AppConfigGlobal {
                 config: (*app_config_for_closure).clone(),
             });
             chat::ensure_state_registered(cx);
 
-            if let Some(pool) = chat_pool.clone() {
-                let chat_cfg = app_config_for_closure.chat.clone();
-                let api_key = chat_cfg
-                    .api_key
-                    .clone()
-                    .filter(|k| !k.is_empty())
-                    .or(app_config_for_closure.credentials.openai_api_key.clone())
-                    .or(app_config_for_closure.credentials.local_llm_api_key.clone());
-                let services = ChatServices::new(pool, chat_cfg, api_key);
-                cx.set_global(services.clone());
-                chat::bootstrap_state(cx, services);
-            }
+            // Initialize chat services with the same database
+            let chat_cfg = app_config_for_closure.chat.clone();
+            let api_key = chat_cfg
+                .api_key
+                .clone()
+                .filter(|k| !k.is_empty())
+                .or(app_config_for_closure.credentials.openai_api_key.clone())
+                .or(app_config_for_closure.credentials.local_llm_api_key.clone());
+            let services = ChatServices::new(db_for_chat, chat_cfg, api_key);
+            cx.set_global(services.clone());
+            chat::bootstrap_state(cx, services);
 
             let bounds = Bounds::centered(None, size(px(1024.0), px(700.0)), cx);
             find_fonts(cx).expect("unable to load fonts");
@@ -426,12 +408,12 @@ pub async fn run() {
             let settings = cx.global::<SettingsGlobal>().model.read(cx);
             let playback_settings = settings.playback.clone();
             let mut scan_interface: ScanInterface =
-                ScanThread::start(pool.clone(), settings.scanning.clone());
+                ScanThread::start(db.clone(), settings.scanning.clone());
             scan_interface.scan();
             scan_interface.start_broadcast(cx);
 
             cx.set_global(scan_interface);
-            cx.set_global(Pool(pool));
+            cx.set_global(Pool(db));
 
             let drop_model = cx.new(|_| DropImageDummyModel);
 

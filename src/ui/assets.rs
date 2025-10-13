@@ -4,17 +4,16 @@ pub mod db;
 use std::borrow::Cow;
 
 use gpui::AssetSource;
-use sqlx::SqlitePool;
 use url::Url;
 
-use crate::ui::assets::bundled::BundledAssets;
+use crate::{db::TursoDatabase, ui::assets::bundled::BundledAssets};
 
 pub struct HummingbirdAssetSource {
-    pool: SqlitePool,
+    pool: TursoDatabase,
 }
 
 impl HummingbirdAssetSource {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: TursoDatabase) -> Self {
         Self { pool }
     }
 }

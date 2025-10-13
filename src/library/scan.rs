@@ -11,8 +11,9 @@ use globwalk::GlobWalkerBuilder;
 use gpui::{App, Global};
 use image::{DynamicImage, EncodableLayout, codecs::jpeg::JpegEncoder, imageops::thumbnail};
 use smol::block_on;
-use sqlx::SqlitePool;
 use tracing::{debug, error, info, warn};
+
+use crate::db::TursoDatabase;
 
 use crate::{
     media::{
@@ -115,7 +116,7 @@ pub enum ScanState {
 pub struct ScanThread {
     event_tx: Sender<ScanEvent>,
     command_rx: Receiver<ScanCommand>,
-    pool: SqlitePool,
+    pool: TursoDatabase,
     scan_settings: ScanSettings,
     visited: Vec<PathBuf>,
     discovered: Vec<PathBuf>,
@@ -186,7 +187,7 @@ fn scan_path_for_album_art(path: &Path) -> Option<Box<[u8]>> {
 }
 
 impl ScanThread {
-    pub fn start(pool: SqlitePool, settings: ScanSettings) -> ScanInterface {
+    pub fn start(pool: TursoDatabase, settings: ScanSettings) -> ScanInterface {
         let (commands_tx, commands_rx) = async_channel::bounded(10);
         let (events_tx, events_rx) = async_channel::unbounded();
 
@@ -383,29 +384,27 @@ impl ScanThread {
             return Ok(None);
         };
 
-        let result: Result<(i64,), sqlx::Error> =
-            sqlx::query_as(include_str!("../../queries/scan/create_artist.sql"))
-                .bind(&artist)
-                .bind(metadata.artist_sort.as_ref().unwrap_or(&artist))
-                .fetch_one(&self.pool)
-                .await;
+        let conn = self.pool.connect()?;
 
-        match result {
-            Ok(v) => Ok(Some(v.0)),
-            Err(sqlx::Error::RowNotFound) => {
-                let result: Result<(i64,), sqlx::Error> =
-                    sqlx::query_as(include_str!("../../queries/scan/get_artist_id.sql"))
-                        .bind(&artist)
-                        .fetch_one(&self.pool)
-                        .await;
+        // Try to insert, returns id if successful, None if conflict
+        let result = conn.query_optional(
+            include_str!("../../queries/scan/create_artist.sql"),
+            (artist.as_str(), metadata.artist_sort.as_ref().unwrap_or(&artist).as_str()),
+            |row| Ok(row.get::<i64>(0)?)
+        ).await?;
 
-                match result {
-                    Ok(v) => Ok(Some(v.0)),
-                    Err(e) => Err(e.into()),
-                }
-            }
-            Err(e) => Err(e.into()),
+        if let Some(id) = result {
+            return Ok(Some(id));
         }
+
+        // Artist already exists, fetch the id
+        let id = conn.query_one(
+            include_str!("../../queries/scan/get_artist_id.sql"),
+            (artist.as_str(),),
+            |row| Ok(row.get::<i64>(0)?)
+        ).await?;
+
+        Ok(Some(id))
     }
 
     async fn insert_album(
@@ -423,88 +422,91 @@ impl ScanThread {
             .clone()
             .unwrap_or_else(|| "none".to_string());
 
-        let result: Result<(i64,), sqlx::Error> =
-            sqlx::query_as(include_str!("../../queries/scan/get_album_id.sql"))
-                .bind(album)
-                .bind(&mbid)
-                .fetch_one(&self.pool)
-                .await;
+        let conn = self.pool.connect()?;
 
-        match result {
-            Ok(v) => Ok(Some(v.0)),
-            Err(sqlx::Error::RowNotFound) => {
-                let (resized_image, thumb) = match image {
-                    Some(image) => {
-                        // if there is a decode error, just ignore it and pretend there is no image
-                        let mut decoded = image::ImageReader::new(Cursor::new(&image))
-                            .with_guessed_format()?
-                            .decode()?
-                            .into_rgb8();
+        // Check if album already exists
+        let existing = conn.query_optional(
+            include_str!("../../queries/scan/get_album_id.sql"),
+            (album.as_str(), mbid.as_str()),
+            |row| Ok(row.get::<i64>(0)?)
+        ).await?;
 
-                        // for some reason, thumbnails don't load properly when saved as rgb8
-                        // also, into_rgba8() causes the application to crash on certain images
-                        //
-                        // no, I don't no why, and no I can't fix it upstream
-                        // this will have to do for now
-                        let decoded_rgba = DynamicImage::ImageRgb8(decoded.clone()).into_rgba8();
-
-                        let thumb = thumbnail(&decoded_rgba, 70, 70);
-
-                        let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-
-                        thumb
-                            .write_to(&mut buf, image::ImageFormat::Bmp)
-                            .expect("i don't know how Cursor could fail");
-                        buf.flush().expect("could not flush buffer");
-
-                        let resized =
-                            if decoded.dimensions().0 <= 1024 || decoded.dimensions().1 <= 1024 {
-                                image.clone().to_vec()
-                            } else {
-                                decoded = image::imageops::resize(
-                                    &decoded,
-                                    1024,
-                                    1024,
-                                    image::imageops::FilterType::Lanczos3,
-                                );
-                                let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-                                let mut encoder = JpegEncoder::new_with_quality(&mut buf, 70);
-
-                                encoder.encode(
-                                    decoded.as_bytes(),
-                                    decoded.width(),
-                                    decoded.height(),
-                                    image::ExtendedColorType::Rgb8,
-                                )?;
-                                buf.flush()?;
-
-                                buf.get_mut().clone()
-                            };
-
-                        (Some(resized), Some(buf.get_mut().clone()))
-                    }
-                    None => (None, None),
-                };
-
-                let result: (i64,) =
-                    sqlx::query_as(include_str!("../../queries/scan/create_album.sql"))
-                        .bind(album)
-                        .bind(metadata.sort_album.as_ref().unwrap_or(album))
-                        .bind(artist_id)
-                        .bind(resized_image)
-                        .bind(thumb)
-                        .bind(metadata.date)
-                        .bind(&metadata.label)
-                        .bind(&metadata.catalog)
-                        .bind(&metadata.isrc)
-                        .bind(&mbid)
-                        .fetch_one(&self.pool)
-                        .await?;
-
-                Ok(Some(result.0))
-            }
-            Err(e) => Err(e.into()),
+        if let Some(id) = existing {
+            return Ok(Some(id));
         }
+
+        // Album doesn't exist, create it
+        let (resized_image, thumb) = match image {
+            Some(image) => {
+                // if there is a decode error, just ignore it and pretend there is no image
+                let mut decoded = image::ImageReader::new(Cursor::new(&image))
+                    .with_guessed_format()?
+                    .decode()?
+                    .into_rgb8();
+
+                // for some reason, thumbnails don't load properly when saved as rgb8
+                // also, into_rgba8() causes the application to crash on certain images
+                //
+                // no, I don't no why, and no I can't fix it upstream
+                // this will have to do for now
+                let decoded_rgba = DynamicImage::ImageRgb8(decoded.clone()).into_rgba8();
+
+                let thumb = thumbnail(&decoded_rgba, 70, 70);
+
+                let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+
+                thumb
+                    .write_to(&mut buf, image::ImageFormat::Bmp)
+                    .expect("i don't know how Cursor could fail");
+                buf.flush().expect("could not flush buffer");
+
+                let resized =
+                    if decoded.dimensions().0 <= 1024 || decoded.dimensions().1 <= 1024 {
+                        image.clone().to_vec()
+                    } else {
+                        decoded = image::imageops::resize(
+                            &decoded,
+                            1024,
+                            1024,
+                            image::imageops::FilterType::Lanczos3,
+                        );
+                        let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+                        let mut encoder = JpegEncoder::new_with_quality(&mut buf, 70);
+
+                        encoder.encode(
+                            decoded.as_bytes(),
+                            decoded.width(),
+                            decoded.height(),
+                            image::ExtendedColorType::Rgb8,
+                        )?;
+                        buf.flush()?;
+
+                        buf.get_mut().clone()
+                    };
+
+                (Some(resized), Some(buf.get_mut().clone()))
+            }
+            None => (None, None),
+        };
+
+        let id = conn.query_one(
+            include_str!("../../queries/scan/create_album.sql"),
+            (
+                album.as_str(),
+                metadata.sort_album.as_ref().unwrap_or(album).as_str(),
+                artist_id,
+                resized_image,
+                thumb,
+                metadata.date.map(|d| d.timestamp()),
+                metadata.label.as_deref(),
+                metadata.catalog.as_deref(),
+                metadata.isrc.as_deref(),
+                mbid.as_str(),
+            ),
+            |row| Ok(row.get::<i64>(0)?)
+        ).await?;
+
+        Ok(Some(id))
     }
 
     async fn insert_track(
@@ -519,30 +521,28 @@ impl ScanThread {
         }
 
         let disc_num = metadata.disc_current.map(|v| v as i64).unwrap_or(-1);
-        let find_path: Result<(String,), _> =
-            sqlx::query_as(include_str!("../../queries/scan/get_album_path.sql"))
-                .bind(album_id)
-                .bind(disc_num)
-                .fetch_one(&self.pool)
-                .await;
-
         let parent = path.parent().unwrap();
 
-        match find_path {
-            Ok(path) => {
-                if path.0.as_str() != parent.as_os_str() {
+        let conn = self.pool.connect()?;
+
+        let existing_path = conn.query_optional(
+            include_str!("../../queries/scan/get_album_path.sql"),
+            (album_id, disc_num),
+            |row| Ok(row.get::<String>(0)?)
+        ).await?;
+
+        match existing_path {
+            Some(path) => {
+                if path.as_str() != parent.as_os_str() {
                     return Ok(());
                 }
             }
-            Err(sqlx::Error::RowNotFound) => {
-                sqlx::query(include_str!("../../queries/scan/create_album_path.sql"))
-                    .bind(album_id)
-                    .bind(parent.to_str())
-                    .bind(disc_num)
-                    .execute(&self.pool)
-                    .await?;
+            None => {
+                conn.execute(
+                    include_str!("../../queries/scan/create_album_path.sql"),
+                    (album_id, parent.to_str(), disc_num)
+                ).await?;
             }
-            Err(e) => return Err(e.into()),
         }
 
         let name = metadata
@@ -555,26 +555,24 @@ impl ScanThread {
             })
             .ok_or_else(|| anyhow::anyhow!("failed to retrieve filename"))?;
 
-        let result: Result<(i64,), sqlx::Error> =
-            sqlx::query_as(include_str!("../../queries/scan/create_track.sql"))
-                .bind(&name)
-                .bind(&name)
-                .bind(album_id)
-                .bind(metadata.track_current.map(|x| x as i32))
-                .bind(metadata.disc_current.map(|x| x as i32))
-                .bind(length as i32)
-                .bind(path.to_str())
-                .bind(&metadata.genre)
-                .bind(&metadata.artist)
-                .bind(parent.to_str())
-                .fetch_one(&self.pool)
-                .await;
+        conn.query_one(
+            include_str!("../../queries/scan/create_track.sql"),
+            (
+                name.as_str(),
+                name.as_str(),
+                album_id,
+                metadata.track_current.map(|x| x as i32),
+                metadata.disc_current.map(|x| x as i32),
+                length as i32,
+                path.to_str(),
+                metadata.genre.as_deref(),
+                metadata.artist.as_deref(),
+                parent.to_str(),
+            ),
+            |row| Ok(row.get::<i64>(0)?)
+        ).await?;
 
-        match result {
-            Ok(_) => Ok(()),
-            Err(sqlx::Error::RowNotFound) => Ok(()),
-            Err(e) => Err(e.into()),
-        }
+        Ok(())
     }
 
     async fn update_metadata(
@@ -674,10 +672,18 @@ impl ScanThread {
 
     async fn delete_track(&mut self, path: &PathBuf) {
         debug!("track deleted or moved: {:?}", path);
-        let result = sqlx::query(include_str!("../../queries/scan/delete_track.sql"))
-            .bind(path.to_str())
-            .execute(&self.pool)
-            .await;
+        let conn = match self.pool.connect() {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Failed to connect to database: {:?}", e);
+                return;
+            }
+        };
+
+        let result = conn.execute(
+            include_str!("../../queries/scan/delete_track.sql"),
+            (path.to_str(),)
+        ).await;
 
         if let Err(e) = result {
             error!("Database error while deleting track: {:?}", e);
