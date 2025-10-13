@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use async_compat::CompatExt;
 use libsql::{Builder, Connection as LibsqlConnection, Database, Rows, params::IntoParams};
 
+use crate::config::TursoSection;
+
 /// Turso connection endpoint abstraction.
 #[derive(Clone, Debug)]
 pub enum TursoEndpoint {
@@ -34,6 +36,47 @@ impl TursoConfig {
             let auth_token = env::var("TURSO_AUTH_TOKEN").context(
                 "TURSO_AUTH_TOKEN must be set when TURSO_DATABASE_URL points to a remote endpoint",
             )?;
+
+            Ok(Self {
+                endpoint: TursoEndpoint::Remote {
+                    url: raw_url,
+                    auth_token,
+                },
+            })
+        } else {
+            Ok(Self {
+                endpoint: TursoEndpoint::File {
+                    path: PathBuf::from(raw_url),
+                },
+            })
+        }
+    }
+
+    pub fn from_sources(config: Option<&TursoSection>) -> Result<Self> {
+        if env::var("TURSO_DATABASE_URL").is_ok() {
+            return Self::from_env();
+        }
+
+        let Some(cfg) = config else {
+            anyhow::bail!(
+                "Provide Turso connection information via environment variables or configuration"
+            );
+        };
+
+        let Some(raw_url) = cfg.database_url.clone() else {
+            anyhow::bail!(
+                "turso.database_url missing; set TURSO_DATABASE_URL or configure it in config.toml"
+            );
+        };
+
+        if raw_url.starts_with("libsql://")
+            || raw_url.starts_with("https://")
+            || raw_url.starts_with("http://")
+        {
+            let auth_token = cfg
+                .auth_token
+                .clone()
+                .context("turso.auth_token required for remote connections")?;
 
             Ok(Self {
                 endpoint: TursoEndpoint::Remote {

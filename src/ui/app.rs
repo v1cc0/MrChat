@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use tracing::{debug, warn};
 
 use crate::{
+    config::{AppConfig, AppConfigGlobal},
     library::{
         db::create_pool,
         scan::{ScanInterface, ScanThread},
@@ -350,7 +351,11 @@ pub async fn run() {
         );
     };
 
-    let turso_pool = match TursoConfig::from_env() {
+    let config_path = directory.join("config.toml");
+    let app_config = AppConfig::load(&config_path);
+    let app_config = Arc::new(app_config);
+
+    let turso_pool = match TursoConfig::from_sources(Some(&app_config.turso)) {
         Ok(config) => match TursoPool::connect(config).await {
             Ok(pool) => Some(Arc::new(pool)),
             Err(err) => {
@@ -365,14 +370,25 @@ pub async fn run() {
     };
 
     let chat_pool = turso_pool.clone();
+    let app_config_for_closure = app_config.clone();
 
     Application::new()
         .with_assets(HummingbirdAssetSource::new(pool.clone()))
         .run(move |cx: &mut App| {
+            cx.set_global(AppConfigGlobal {
+                config: (*app_config_for_closure).clone(),
+            });
             chat::ensure_state_registered(cx);
 
             if let Some(pool) = chat_pool.clone() {
-                let services = ChatServices::new(pool);
+                let chat_cfg = app_config_for_closure.chat.clone();
+                let api_key = chat_cfg
+                    .api_key
+                    .clone()
+                    .filter(|k| !k.is_empty())
+                    .or(app_config_for_closure.credentials.openai_api_key.clone())
+                    .or(app_config_for_closure.credentials.local_llm_api_key.clone());
+                let services = ChatServices::new(pool, chat_cfg, api_key);
                 cx.set_global(services.clone());
                 chat::bootstrap_state(cx, services);
             }

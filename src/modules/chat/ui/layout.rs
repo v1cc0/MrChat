@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use gpui::{
     App, AppContext, Context, CursorStyle, Entity, FocusHandle, FontWeight, InteractiveElement,
@@ -20,7 +20,6 @@ use crate::{
 };
 
 const DEFAULT_CHAT_TITLE: &str = "新会话";
-const DEFAULT_CHAT_MODEL: &str = "default";
 
 pub struct ChatOverview {
     input: Entity<TextInput>,
@@ -99,8 +98,9 @@ impl ChatOverview {
                     .unwrap_or(None);
 
                 if conversation_id.is_none() {
+                    let default_model = services.chat_config().default_model.clone();
                     match services
-                        .create_conversation(DEFAULT_CHAT_TITLE, DEFAULT_CHAT_MODEL)
+                        .create_conversation(DEFAULT_CHAT_TITLE, default_model.as_str())
                         .await
                     {
                         Ok(summary) => {
@@ -163,35 +163,28 @@ impl ChatOverview {
                                 }
                             });
                         });
-                        // Placeholder assistant echo until real LLM is integrated
-                        let services_clone = services.clone();
-                        app.background_executor()
-                            .timer(Duration::from_millis(300))
-                            .await;
-
-                        match services_clone
-                            .append_message(
-                                conv_id.clone(),
-                                MessageRole::Assistant,
-                                format!("(LLM TODO) 回显: {}", text),
-                                None,
-                            )
-                            .await
-                        {
-                            Ok(assistant_msg) => {
-                                let _ = app.update(|app| {
-                                    let state = app.global::<ChatState>();
-                                    let messages = state.messages.clone();
-                                    messages.update(app, |msgs, cx| {
-                                        msgs.push(assistant_msg.clone());
-                                        cx.notify();
-                                    });
-                                });
-                            }
-                            Err(err) => warn!("failed to append assistant message: {err:?}"),
-                        }
                     }
-                    Err(err) => warn!("failed to append chat message: {err:?}"),
+                    Err(err) => {
+                        warn!("failed to append chat message: {err:?}");
+                        return;
+                    }
+                }
+
+                match services.generate_assistant_reply(&conv_id).await {
+                    Ok(Some(assistant_msg)) => {
+                        let _ = app.update(|app| {
+                            let state = app.global::<ChatState>();
+                            let messages = state.messages.clone();
+                            messages.update(app, |msgs, cx| {
+                                msgs.push(assistant_msg.clone());
+                                cx.notify();
+                            });
+                        });
+                    }
+                    Ok(None) => {
+                        warn!("LLM endpoint未配置，跳过助手回复");
+                    }
+                    Err(err) => warn!("failed to fetch assistant response: {err:?}"),
                 }
             }
         })
@@ -202,10 +195,11 @@ impl ChatOverview {
         let Some(services) = cx.try_global::<ChatServices>().cloned() else {
             return;
         };
+        let default_model = services.chat_config().default_model.clone();
 
         cx.spawn(async move |_weak: WeakEntity<Self>, app| {
             match services
-                .create_conversation(DEFAULT_CHAT_TITLE, DEFAULT_CHAT_MODEL)
+                .create_conversation(DEFAULT_CHAT_TITLE, default_model.as_str())
                 .await
             {
                 Ok(summary) => {
@@ -244,7 +238,7 @@ impl Render for ChatOverview {
                 .px(px(24.0))
                 .py(px(16.0))
                 .text_color(rgba(0x94a3b8ff))
-                .child("聊天不可用：缺少 Turso 配置");
+                .child("聊天不可用：缺少 Turso 配置或聊天服务");
         }
 
         if !self.focus.is_focused(window) {

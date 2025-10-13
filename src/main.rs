@@ -7,6 +7,7 @@
 use services::mmb::lastfm::{LASTFM_API_KEY, LASTFM_API_SECRET};
 use smol_macros::main;
 
+mod config;
 mod devices;
 mod library;
 mod media;

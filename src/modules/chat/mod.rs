@@ -9,7 +9,7 @@ use anyhow::Result;
 use gpui::App;
 use tracing::error;
 
-use crate::shared::db::TursoPool;
+use crate::{config::ChatSection, shared::db::TursoPool};
 
 use self::{
     models::{ChatState, ConversationId, LlmRequestState},
@@ -20,11 +20,17 @@ use self::{
 /// High level entry point for chat functionality.
 pub struct ChatFacade {
     db: Arc<TursoPool>,
+    chat_config: ChatSection,
+    api_key: Option<String>,
 }
 
 impl ChatFacade {
-    pub fn new(db: Arc<TursoPool>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<TursoPool>, chat_config: ChatSection, api_key: Option<String>) -> Self {
+        Self {
+            db,
+            chat_config,
+            api_key,
+        }
     }
 
     pub fn db(&self) -> Arc<TursoPool> {
@@ -32,7 +38,11 @@ impl ChatFacade {
     }
 
     pub fn services(&self) -> services::ChatServices {
-        services::ChatServices::new(self.db.clone())
+        services::ChatServices::new(
+            self.db.clone(),
+            self.chat_config.clone(),
+            self.api_key.clone(),
+        )
     }
 
     pub fn dao(&self) -> ChatDao {
@@ -41,8 +51,12 @@ impl ChatFacade {
 }
 
 /// Bootstrap helper used when we only have configuration yet.
-pub async fn init_from_pool(pool: TursoPool) -> Result<ChatFacade> {
-    Ok(ChatFacade::new(Arc::new(pool)))
+pub async fn init_from_pool(
+    pool: TursoPool,
+    chat_config: ChatSection,
+    api_key: Option<String>,
+) -> Result<ChatFacade> {
+    Ok(ChatFacade::new(Arc::new(pool), chat_config, api_key))
 }
 
 pub fn ensure_state_registered(cx: &mut App) {

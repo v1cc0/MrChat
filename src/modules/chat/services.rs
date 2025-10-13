@@ -1,9 +1,11 @@
 use std::{sync::Arc, time::SystemTime};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use gpui::Global;
+use isahc::{AsyncReadResponseExt, prelude::*};
+use serde_json::json;
 
-use crate::shared::db::TursoPool;
+use crate::{config::ChatSection, shared::db::TursoPool};
 
 use super::{
     models::{ConversationId, ConversationSummary, Message, MessageRole},
@@ -15,13 +17,25 @@ use super::{
 pub struct ChatServices {
     db: Arc<TursoPool>,
     dao: ChatDao,
-    // llm: TODO add LLM client once interface is defined.
+    chat_config: ChatSection,
+    api_key: Option<String>,
 }
 
 impl ChatServices {
-    pub fn new(db: Arc<TursoPool>) -> Self {
+    pub fn new(db: Arc<TursoPool>, chat_config: ChatSection, api_key: Option<String>) -> Self {
         let dao = ChatDao::new(db.clone());
-        Self { db, dao }
+        let api_key = chat_config
+            .api_key
+            .clone()
+            .filter(|k| !k.is_empty())
+            .or(api_key.filter(|k| !k.is_empty()));
+
+        Self {
+            db,
+            dao,
+            chat_config,
+            api_key,
+        }
     }
 
     pub fn pool(&self) -> Arc<TursoPool> {
@@ -30,6 +44,10 @@ impl ChatServices {
 
     pub fn dao(&self) -> &ChatDao {
         &self.dao
+    }
+
+    pub fn chat_config(&self) -> &ChatSection {
+        &self.chat_config
     }
 
     pub async fn ensure_schema(&self) -> Result<()> {
@@ -90,6 +108,92 @@ impl ChatServices {
     pub async fn store_message(&self, message: Message) -> Result<Message> {
         self.dao.append_message(&message).await?;
         Ok(message)
+    }
+
+    pub async fn generate_assistant_reply(
+        &self,
+        conversation_id: &ConversationId,
+    ) -> Result<Option<Message>> {
+        if self.chat_config.api_endpoint.is_empty() {
+            return Ok(None);
+        }
+
+        let history = self.dao.list_messages(conversation_id).await?;
+
+        let mut payload_messages = Vec::new();
+        for message in history
+            .iter()
+            .rev()
+            .take(50)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
+            let role = match message.role {
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::System => "system",
+                MessageRole::Tool => "tool",
+            };
+            payload_messages.push(json!({
+                "role": role,
+                "content": message.content,
+            }));
+        }
+
+        let payload = json!({
+            "model": self.chat_config.default_model,
+            "messages": payload_messages,
+        });
+
+        let mut request = isahc::http::Request::builder()
+            .method(isahc::http::Method::POST)
+            .uri(&self.chat_config.api_endpoint)
+            .header("content-type", "application/json");
+
+        if let Some(key) = self.api_key.as_ref() {
+            request = request.header("authorization", format!("Bearer {}", key));
+        }
+
+        let request = request
+            .body(serde_json::to_vec(&payload)?)
+            .context("failed to build assistant request")?;
+
+        let mut response = isahc::send_async(request)
+            .await
+            .context("failed to send assistant request")?;
+
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            bail!(
+                "assistant request failed with status {}: {}",
+                response.status(),
+                body
+            );
+        }
+
+        let body = response
+            .text()
+            .await
+            .context("failed to read assistant response body")?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).context("failed to parse assistant response json")?;
+
+        let reply_text = parsed
+            .pointer("/choices/0/message/content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                parsed
+                    .pointer("/choices/0/text")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
+            .context("assistant response missing content")?;
+
+        let message = Message::new(conversation_id.clone(), MessageRole::Assistant, reply_text);
+        self.dao.append_message(&message).await?;
+
+        Ok(Some(message))
     }
 
     /// Placeholder for ensuring the pipeline works end-to-end.
