@@ -1,0 +1,26 @@
+# Global application settings
+[app]
+name = "MrChat"
+theme = "dark"
+
+# Chat module configuration
+[chat]
+default_model = "gpt-4.1"
+max_context_tokens = 8192
+api_endpoint = "http://localhost:11434/v1/chat/completions"
+
+# Music player settings
+[player]
+scan_directories = []
+resume_playback = true
+default_volume = 0.65
+
+# Turso connection details (recommended to override via environment variables)
+[turso]
+database_url = "libsql://localhost:8080"
+auth_token = "replace-with-your-token"
+
+# Credentials and secrets should not be committed in plain text
+[credentials]
+openai_api_key = "replace-with-your-key"
+local_llm_api_key = ""

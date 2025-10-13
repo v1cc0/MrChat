@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use gpui::{
     App, AppContext, Context, CursorStyle, Entity, FocusHandle, FontWeight, InteractiveElement,
@@ -163,6 +163,33 @@ impl ChatOverview {
                                 }
                             });
                         });
+                        // Placeholder assistant echo until real LLM is integrated
+                        let services_clone = services.clone();
+                        app.background_executor()
+                            .timer(Duration::from_millis(300))
+                            .await;
+
+                        match services_clone
+                            .append_message(
+                                conv_id.clone(),
+                                MessageRole::Assistant,
+                                format!("(LLM TODO) 回显: {}", text),
+                                None,
+                            )
+                            .await
+                        {
+                            Ok(assistant_msg) => {
+                                let _ = app.update(|app| {
+                                    let state = app.global::<ChatState>();
+                                    let messages = state.messages.clone();
+                                    messages.update(app, |msgs, cx| {
+                                        msgs.push(assistant_msg.clone());
+                                        cx.notify();
+                                    });
+                                });
+                            }
+                            Err(err) => warn!("failed to append assistant message: {err:?}"),
+                        }
                     }
                     Err(err) => warn!("failed to append chat message: {err:?}"),
                 }

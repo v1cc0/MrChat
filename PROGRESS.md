@@ -16,6 +16,7 @@
 - 扩展 `ChatServices` 暴露会话/消息 API，新增 `chat::bootstrap_state` 以异步同步数据；提供 `ChatOverview` 占位视图展示会话/消息概览。
 - 将 Turso 聊天服务接入应用启动流程，并在主窗口嵌入 `ChatOverview` 支持基本会话切换与消息加载。
 - 新增聊天会话面板与输入框，支持新建会话、发送消息并即时刷新 Turso 状态。
+- 创建 `config.toml` 模板，集中记录应用、聊天、播放器及 Turso 配置示例。
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
