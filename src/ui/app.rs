@@ -493,7 +493,7 @@ pub async fn run() {
                             library: Library::new(cx),
                             header: Header::new(cx),
                             search: SearchView::new(cx),
-                            chat_overview: cx.new(|_| ChatOverview::new()),
+                            chat_overview: ChatOverview::create(cx),
                             show_queue,
                             show_about,
                         }
