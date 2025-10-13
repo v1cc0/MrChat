@@ -341,15 +341,21 @@ pub async fn run() {
             .unwrap_or_else(|e| panic!("couldn't create data directory, {:?}, {:?}", directory, e));
     }
 
-    // Use a single Turso database for both library and chat
-    let db_path = directory.join("app.db");
-    let db = match TursoDatabase::open_local(&db_path).await {
+    // Create separate databases for music and chat functionality
+    let music_db_path = directory.join("music.db");
+    let music_db = match TursoDatabase::open_local(&music_db_path).await {
         Ok(db) => db,
-        Err(err) => panic!("fatal: unable to open Turso database {:?}: {:?}", db_path, err),
+        Err(err) => panic!("fatal: unable to open music database {:?}: {:?}", music_db_path, err),
+    };
+
+    let chat_db_path = directory.join("mrchat.db");
+    let chat_db = match TursoDatabase::open_local(&chat_db_path).await {
+        Ok(db) => db,
+        Err(err) => panic!("fatal: unable to open chat database {:?}: {:?}", chat_db_path, err),
     };
 
     // Run migrations for library schema
-    if let Err(err) = db.run_migrations("./migrations").await {
+    if let Err(err) = music_db.run_migrations("./migrations").await {
         warn!("failed to run library migrations: {:?}", err);
     }
 
@@ -357,18 +363,18 @@ pub async fn run() {
     let app_config = AppConfig::load(&config_path);
     let app_config = Arc::new(app_config);
 
-    let db_for_chat = Arc::new(db.clone());
+    let db_for_chat = Arc::new(chat_db.clone());
     let app_config_for_closure = app_config.clone();
 
     Application::new()
-        .with_assets(HummingbirdAssetSource::new(db.clone()))
+        .with_assets(HummingbirdAssetSource::new(music_db.clone()))
         .run(move |cx: &mut App| {
             cx.set_global(AppConfigGlobal {
                 config: (*app_config_for_closure).clone(),
             });
             chat::ensure_state_registered(cx);
 
-            // Initialize chat services with the same database
+            // Initialize chat services with separate database (mrchat.db)
             let chat_cfg = app_config_for_closure.chat.clone();
             let api_key = chat_cfg
                 .api_key
@@ -408,12 +414,12 @@ pub async fn run() {
             let settings = cx.global::<SettingsGlobal>().model.read(cx);
             let playback_settings = settings.playback.clone();
             let mut scan_interface: ScanInterface =
-                ScanThread::start(db.clone(), settings.scanning.clone());
+                ScanThread::start(music_db.clone(), settings.scanning.clone());
             scan_interface.scan();
             scan_interface.start_broadcast(cx);
 
             cx.set_global(scan_interface);
-            cx.set_global(Pool(db));
+            cx.set_global(Pool(music_db));
 
             let drop_model = cx.new(|_| DropImageDummyModel);
 
