@@ -2,10 +2,10 @@
 name = "mrchat"
 version = "0.0.1"
 edition = "2024"
-description = "Music Player"
+description = "Ai Chat"
 license = "Apache-2.0"
 readme = "README.md"
-categories = ["multimedia::audio"]
+categories = ["ai::chat"]
 
 [features]
 runtime_shaders = ["gpui/runtime_shaders"]
@@ -57,7 +57,10 @@ urlencoding = "2"
 raw-window-handle = "0.6"
 regex = "1"
 base64 = "0.22"
-libsql = { version = "0.9.24", default-features = false, features = ["core", "remote"] }
+libsql = { version = "0.9.24", default-features = false, features = [
+  "core",
+  "remote",
+] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.10", features = ["v4"] }
 
