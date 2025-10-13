@@ -1,0 +1,122 @@
+[package]
+name = "mrchat"
+version = "0.0.1"
+edition = "2024"
+description = "Music Player"
+license = "Apache-2.0"
+readme = "README.md"
+categories = ["multimedia::audio"]
+
+[features]
+runtime_shaders = ["gpui/runtime_shaders"]
+
+[dependencies]
+ahash = { version = "0.8", features = ["serde"] }
+anyhow = "1"
+async-trait = "0.1"
+async-channel = "2"
+async-lock = "3"
+async-compat = "0.2"
+bitflags = "2"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+cpal = "0.16"
+dateparser = "0.2"
+directories = "6"
+globwalk = "0.9"
+futures = "0.3"
+gpui = "0.2.0"
+image = "0.25"
+indexmap = { version = "2", features = ["std", "serde"] }
+intx = "0.1"
+isahc = { version = "1", features = ["json", "static-ssl"] }
+md5 = "0.8"
+moka = { version = "0.12", features = ["future"] }
+notify = "8"
+nucleo = "0.5"
+open = "5"
+rand = "0.9"
+rb = "0.4"
+rubato = "0.16"
+rust-embed = "8"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smallvec = "1"
+sqlx = { version = "0.8", features = ["runtime-async-std", "sqlite", "chrono"] }
+smol-macros = "0.1"
+smol = "2"
+symphonia = { version = "0.5", features = ["all", "opt-simd-sse"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+unicode-segmentation = "1"
+url = "2.5.7"
+urlencoding = "2"
+raw-window-handle = "0.6"
+regex = "1"
+base64 = "0.22"
+libsql = { version = "0.9.24", default-features = false, features = ["core", "remote"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[build-dependencies]
+dotenvy = "0.15"
+vergen-git2 = { version = "1" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+  "Media",
+  "Media_Audio",
+  "Media_Render",
+  "Media_MediaProperties",
+  "Devices_Enumeration",
+  "Foundation_Collections",
+  "Storage_Streams",
+  "Storage_Search",
+  "Win32_System_WinRT",
+  "Win32_System_Com",
+] }
+windows-result = "0.4"
+windows-future = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+  "NSDictionary",
+  "NSValue",
+  "NSData",
+] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
+objc2-app-kit = { version = "0.3", features = ["NSImage"] }
+objc2-media-player = { version = "0.3", features = ["MPNowPlayingInfoCenter"] }
+imagesize = "0.14"
+block2 = "0.6"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = "0.9"
+zbus = "5"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.release-distro]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+opt-level = "s"
+
+[package.metadata.bundle]
+name = "MrChat"
+identifier = "org.v1cc0.MrChat"
+category = "public.app-category.ai"
+icon = [
+  "./res/icon/32x32.png",
+  "./res/icon/32x32@2x.png",
+  "./res/icon/128x128.png",
+  "./res/icon/128x128@2x.png",
+  "./res/icon/256x256.png",
+  "./res/icon/256x256@2x.png",
+  "./res/icon/512x512.png",
+  "./res/icon/512x512@2x.png",
+]

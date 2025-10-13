@@ -1,0 +1,19 @@
+# cargo artifacts
+/target
+/release
+.cargo/
+.env
+.env.original
+config.toml
+Cargo.lock
+# dev scripts
+/dev
+# Binary in project root (created by make build)
+/mrchat
+# agent files
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+PROGRESS.md
+INCIDENTS.md
+ACCIDENTS.md
