@@ -2,6 +2,7 @@ use std::time::SystemTime;
 
 use gpui::{App, AppContext, Entity, Global};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Unique conversation identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -10,6 +11,10 @@ pub struct ConversationId(pub String);
 impl ConversationId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
+    }
+
+    pub fn generate() -> Self {
+        Self(Uuid::new_v4().to_string())
     }
 }
 
@@ -31,6 +36,33 @@ pub struct Message {
     pub content: String,
     pub created_at: SystemTime,
     pub token_usage: Option<u32>,
+}
+
+impl Message {
+    pub fn new(
+        conversation_id: ConversationId,
+        role: MessageRole,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            conversation_id,
+            role,
+            content: content.into(),
+            created_at: SystemTime::now(),
+            token_usage: None,
+        }
+    }
+
+    pub fn with_created_at(mut self, created_at: SystemTime) -> Self {
+        self.created_at = created_at;
+        self
+    }
+
+    pub fn with_token_usage(mut self, token_usage: Option<u32>) -> Self {
+        self.token_usage = token_usage;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,6 +109,34 @@ impl ChatState {
             current_conversation,
             messages,
             request_state,
+        });
+    }
+
+    pub fn set_conversations(&self, cx: &mut App, conversations: Vec<ConversationSummary>) {
+        self.conversations.update(cx, |data, cx| {
+            *data = conversations;
+            cx.notify();
+        });
+    }
+
+    pub fn set_current_conversation(&self, cx: &mut App, conversation: Option<ConversationId>) {
+        self.current_conversation.update(cx, |current, cx| {
+            *current = conversation;
+            cx.notify();
+        });
+    }
+
+    pub fn set_messages(&self, cx: &mut App, messages: Vec<Message>) {
+        self.messages.update(cx, |data, cx| {
+            *data = messages;
+            cx.notify();
+        });
+    }
+
+    pub fn set_request_state(&self, cx: &mut App, state: LlmRequestState) {
+        self.request_state.update(cx, |slot, cx| {
+            *slot = state;
+            cx.notify();
         });
     }
 }

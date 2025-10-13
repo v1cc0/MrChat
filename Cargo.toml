@@ -58,6 +58,7 @@ regex = "1"
 base64 = "0.22"
 libsql = { version = "0.9.24", default-features = false, features = ["core", "remote"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.10", features = ["v4"] }
 
 [build-dependencies]
 dotenvy = "0.15"
