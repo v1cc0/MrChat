@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::SystemTime};
 
 use anyhow::Result;
+use gpui::Global;
 
 use crate::shared::db::TursoPool;
 
@@ -100,3 +101,5 @@ impl ChatServices {
         Ok(())
     }
 }
+
+impl Global for ChatServices {}

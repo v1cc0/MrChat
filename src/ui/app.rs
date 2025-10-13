@@ -8,19 +8,21 @@ use directories::ProjectDirs;
 use gpui::*;
 use prelude::FluentBuilder;
 use sqlx::SqlitePool;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     library::{
         db::create_pool,
         scan::{ScanInterface, ScanThread},
     },
+    modules::chat::{self, services::ChatServices, ui::layout::ChatOverview},
     playback::{interface::GPUIPlaybackInterface, queue::QueueItemData, thread::PlaybackThread},
     services::controllers::make_cl,
     settings::{
         SettingsGlobal, setup_settings,
         storage::{Storage, StorageData},
     },
+    shared::db::{TursoConfig, TursoPool},
     ui::{assets::HummingbirdAssetSource, constants::APP_SHADOW_SIZE},
 };
 
@@ -47,6 +49,7 @@ struct WindowShadow {
     pub library: Entity<Library>,
     pub header: Entity<Header>,
     pub search: Entity<SearchView>,
+    pub chat_overview: Entity<ChatOverview>,
     pub show_queue: Entity<bool>,
     pub show_about: Entity<bool>,
 }
@@ -62,7 +65,9 @@ impl Render for WindowShadow {
         window.set_client_inset(shadow_size);
 
         let queue = self.queue.clone();
+        let show_queue_flag = *self.show_queue.read(cx);
         let show_about = *self.show_about.clone().read(cx);
+        let chat_overview = self.chat_overview.clone();
 
         let mut element = div()
             .id("window-backdrop")
@@ -196,17 +201,41 @@ impl Render for WindowShadow {
                     .max_w_full()
                     .max_h_full()
                     .child(self.header.clone())
-                    .child(
-                        div()
-                            .w_full()
-                            .h_full()
+                    .child({
+                        let mut library_column = div()
                             .flex()
+                            .flex_col()
+                            .flex_grow()
                             .max_w_full()
                             .max_h_full()
                             .overflow_hidden()
-                            .child(self.library.clone())
-                            .when(*self.show_queue.read(cx), |this| this.child(queue)),
-                    )
+                            .child(self.library.clone());
+
+                        if show_queue_flag {
+                            library_column = library_column.child(queue);
+                        }
+
+                        let chat_column = div()
+                            .flex()
+                            .flex_col()
+                            .flex_basis(px(340.0))
+                            .flex_shrink_0()
+                            .max_h_full()
+                            .bg(theme.background_secondary)
+                            .rounded(px(12.0))
+                            .p(px(16.0))
+                            .child(chat_overview);
+
+                        div()
+                            .flex()
+                            .gap(px(20.0))
+                            .w_full()
+                            .h_full()
+                            .max_w_full()
+                            .max_h_full()
+                            .child(library_column)
+                            .child(chat_column)
+                    })
                     .child(self.controls.clone())
                     .child(self.search.clone())
                     .when(show_about, |this| {
@@ -321,9 +350,33 @@ pub async fn run() {
         );
     };
 
+    let turso_pool = match TursoConfig::from_env() {
+        Ok(config) => match TursoPool::connect(config).await {
+            Ok(pool) => Some(Arc::new(pool)),
+            Err(err) => {
+                warn!("chat module disabled: failed to connect to Turso ({err:?})");
+                None
+            }
+        },
+        Err(err) => {
+            warn!("chat module disabled: Turso configuration missing ({err:?})");
+            None
+        }
+    };
+
+    let chat_pool = turso_pool.clone();
+
     Application::new()
         .with_assets(HummingbirdAssetSource::new(pool.clone()))
         .run(move |cx: &mut App| {
+            chat::ensure_state_registered(cx);
+
+            if let Some(pool) = chat_pool.clone() {
+                let services = ChatServices::new(pool);
+                cx.set_global(services.clone());
+                chat::bootstrap_state(cx, services);
+            }
+
             let bounds = Bounds::centered(None, size(px(1024.0), px(700.0)), cx);
             find_fonts(cx).expect("unable to load fonts");
             register_actions(cx);
@@ -440,6 +493,7 @@ pub async fn run() {
                             library: Library::new(cx),
                             header: Header::new(cx),
                             search: SearchView::new(cx),
+                            chat_overview: cx.new(|_| ChatOverview::new()),
                             show_queue,
                             show_about,
                         }
