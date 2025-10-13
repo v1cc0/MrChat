@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use async_compat::CompatExt;
-use libsql::{params::IntoParams, Builder, Connection as LibsqlConnection, Database, Rows};
+use libsql::{Builder, Connection as LibsqlConnection, Database, Rows, params::IntoParams};
 
 /// Turso connection endpoint abstraction.
 #[derive(Clone, Debug)]

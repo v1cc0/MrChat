@@ -12,13 +12,14 @@
 - 确认 Turso 作为唯一数据库后端，取代原有 SQLite 依赖。
 - 形成《docs/chat_player_architecture.md》架构方案，涵盖模块拆分与 Turso 表设计。
 - 搭建 `shared::db::TursoPool` 封装与 `modules/chat` 骨架（状态模型、服务占位、占位 UI）。
+- 完成 `modules/chat/storage::ChatDao`，实现 Turso 表建模与会话/消息 CRUD，并接入 `ChatServices`。
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
 - 拟定 UI 线路图：对齐现有窗口骨架（`WindowShadow`）及组件布局，规划对话列表区、消息区、输入区。
 - 规划 API Key 与 Turso 连接配置的存放方式，确保热更新与启动流程一致。
-- 绘制服务层设计（LLM 请求、消息流式处理、错误重试），与 UI/模型层接口契合。
 - 设计音乐模块与聊天界面的模块化隔离（启动/挂起/控制接口），确保互不干扰。
 - 评估并改造音乐库扫描/查询/缓存逻辑以适配 Turso API。
 - 实现 Turso 连接配置加载 + 健康检查命令，补齐 CRUD 基础。
 - 为聊天服务层提供最小 API（会话创建、消息写入）并准备集成测试框架。
+- 设计聊天 UI 原型并将 `ChatDao` 的数据流接入 `ChatState` 以驱动前端视图。

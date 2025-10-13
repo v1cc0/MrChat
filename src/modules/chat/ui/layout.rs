@@ -1,4 +1,4 @@
-use gpui::{div, IntoElement, ParentElement};
+use gpui::{IntoElement, ParentElement, div};
 
 /// Stub layout, to be replaced with full chat UI.
 pub fn placeholder() -> impl IntoElement {

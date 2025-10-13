@@ -1,5 +1,6 @@
 pub mod models;
 pub mod services;
+pub mod storage;
 pub mod ui;
 
 use std::sync::Arc;
@@ -7,6 +8,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::shared::db::TursoPool;
+
+use self::storage::ChatDao;
 
 /// High level entry point for chat functionality.
 pub struct ChatFacade {
@@ -24,6 +27,10 @@ impl ChatFacade {
 
     pub fn services(&self) -> services::ChatServices {
         services::ChatServices::new(self.db.clone())
+    }
+
+    pub fn dao(&self) -> ChatDao {
+        ChatDao::new(self.db.clone())
     }
 }
 
