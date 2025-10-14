@@ -1,6 +1,6 @@
 use std::{future::Future, path::Path, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use std::fs;
 
 use smol::{Timer, block_on};
@@ -251,12 +251,10 @@ async fn apply_pragmas(conn: &TursoConnection) -> Result<()> {
         warn!("Failed to enable WAL mode on connection: {:?}", err);
     }
 
-    if let Err(err) = run_with_retry(|| async {
-        conn.execute("PRAGMA busy_timeout = 5000", ())
-            .await
-            .map(|_| ())
-    })
-    .await
+    if let Err(err) = conn
+        .inner
+        .busy_timeout(Duration::from_millis(5000))
+        .map_err(|err| Error::msg(err.to_string()))
     {
         warn!(
             "Failed to set busy timeout on connection (continuing without it): {:?}",
@@ -272,12 +270,17 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
-    const MAX_RETRIES: usize = 5;
+    const MAX_RETRIES: usize = 10;
+    const BASE_DELAY_MS: u64 = 100;
+    const MAX_DELAY_MS: u64 = 1500;
+
     for attempt in 0..=MAX_RETRIES {
         match op().await {
             Ok(value) => return Ok(value),
             Err(err) if is_locked(&err) && attempt < MAX_RETRIES => {
-                let delay = Duration::from_millis(50 * (attempt as u64 + 1));
+                let exponential = BASE_DELAY_MS * (1_u64 << attempt);
+                let delay_ms = exponential.min(MAX_DELAY_MS);
+                let delay = Duration::from_millis(delay_ms);
                 Timer::after(delay).await;
             }
             Err(err) => return Err(err),
