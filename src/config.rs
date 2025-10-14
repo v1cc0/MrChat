@@ -17,7 +17,7 @@ pub struct ChatSection {
     pub default_model: String,
     #[serde(default = "default_chat_endpoint")]
     pub api_endpoint: String,
-    #[serde(default, alias = "api_key", alias = "api_api_key")]
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default = "default_max_context")]
     pub max_context_tokens: u32,

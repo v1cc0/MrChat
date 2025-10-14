@@ -8,6 +8,7 @@ theme = "dark"
 default_model = "gpt-4.1"
 max_context_tokens = 8192
 api_endpoint = "http://localhost:11434/v1/chat/completions"
+api_key = ""
 
 # Music player settings
 [player]
