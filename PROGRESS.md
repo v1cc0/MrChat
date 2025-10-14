@@ -189,6 +189,19 @@
       - folder: 第 12 列（不在结构体中，忽略）
   - **结果**：✅ 播放功能完全正常，所有歌曲路径正确加载
   - **教训**：使用 `SELECT *` 时必须严格匹配表的实际列顺序，建议在数据库 schema 变更后及时更新所有 from_row 实现
+- **调试暂停/停止功能问题**：
+  - **问题**：用户报告播放功能正常，但暂停和停止按钮不起作用
+  - **调查过程**：
+    - 检查 UI 按钮事件绑定（src/player/ui/controls.rs）：✅ 正确分发 PlayPause action
+    - 检查 GPUIPlaybackInterface 实现（src/player/playback/interface.rs）：✅ pause() 和 stop() 正确发送命令
+    - 检查 playback thread 命令处理（src/player/playback/thread.rs）：✅ command_intake() 正确匹配和调用
+    - 检查 pause() 和 stop() 函数实现：✅ 逻辑正确
+  - **添加调试日志**（待测试）：
+    - global_actions.rs:75-93：记录 PlayPause action 触发和状态判断
+    - thread.rs:293：记录所有接收到的命令
+    - thread.rs:318-325：记录 pause() 调用和状态变化
+    - thread.rs:877-883：记录 stop() 调用
+  - **状态**：调试日志已添加并编译成功，等待用户运行应用测试并查看日志输出
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

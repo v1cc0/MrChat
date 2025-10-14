@@ -290,6 +290,7 @@ impl PlaybackThread {
     /// Read incoming commands from the command channel, and process them.
     pub fn command_intake(&mut self) {
         while let Ok(command) = self.commands_rx.try_recv() {
+            info!("Received command: {:?}", command);
             match command {
                 PlaybackCommand::Play => self.play(),
                 PlaybackCommand::Pause => self.pause(),
@@ -314,11 +315,14 @@ impl PlaybackThread {
 
     /// Pause playback.
     pub fn pause(&mut self) {
+        info!("pause() called, current state: {:?}", self.state);
         if self.state == PlaybackState::Paused {
+            info!("Already paused, returning");
             return;
         }
 
         if self.state == PlaybackState::Playing {
+            info!("Pausing stream...");
             if let Some(stream) = &mut self.stream {
                 // stream is being played right now which means it has to be valid
                 // this is fine
@@ -870,11 +874,13 @@ impl PlaybackThread {
 
     /// Stop the current playback.
     fn stop(&mut self) {
+        info!("stop() called, current state: {:?}", self.state);
         if let Some(provider) = &mut self.media_provider {
             provider.stop_playback().expect("unable to stop playback");
             provider.close().expect("unable to close media");
         }
         self.state = PlaybackState::Stopped;
+        info!("Playback stopped");
 
         let events_tx = self.events_tx.clone();
         smol::spawn(async move {
