@@ -241,21 +241,28 @@ impl TursoConnection {
 }
 
 async fn apply_pragmas(conn: &TursoConnection) -> Result<()> {
-    run_with_retry(|| async {
+    if let Err(err) = run_with_retry(|| async {
         conn.query_scalar::<String>("PRAGMA journal_mode = WAL", ())
             .await
             .map(|_| ())
     })
     .await
-    .context("failed to enable WAL mode")?;
+    {
+        warn!("Failed to enable WAL mode on connection: {:?}", err);
+    }
 
-    run_with_retry(|| async {
+    if let Err(err) = run_with_retry(|| async {
         conn.execute("PRAGMA busy_timeout = 5000", ())
             .await
             .map(|_| ())
     })
     .await
-    .context("failed to set busy timeout")?;
+    {
+        warn!(
+            "Failed to set busy timeout on connection (continuing without it): {:?}",
+            err
+        );
+    }
 
     Ok(())
 }
