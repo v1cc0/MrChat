@@ -105,6 +105,9 @@ pub struct PlaybackThread {
 
     /// Whether or not the queue should be repeated when the end of the queue is reached.
     repeat: RepeatState,
+
+    /// Count of consecutive failures to open files. Used to prevent infinite recursion.
+    consecutive_failures: usize,
 }
 
 pub const LN_50: f64 = 3.91202300543_f64;
@@ -145,6 +148,7 @@ impl PlaybackThread {
                         RepeatState::NotRepeating
                     },
                     playback_settings: settings,
+                    consecutive_failures: 0,
                 };
 
                 thread.run();
@@ -417,12 +421,30 @@ impl PlaybackThread {
         // Check if path is empty or invalid
         if path.as_os_str().is_empty() {
             error!("Cannot open file: path is empty");
+            self.consecutive_failures += 1;
+
+            // Prevent infinite recursion by limiting consecutive failures
+            if self.consecutive_failures > 10 {
+                error!("Too many consecutive failures ({}), stopping playback", self.consecutive_failures);
+                self.stop();
+                return;
+            }
+
             self.next(false);
             return;
         }
 
         if !path.exists() {
             error!("Cannot open file: path does not exist: {:?}", path);
+            self.consecutive_failures += 1;
+
+            // Prevent infinite recursion by limiting consecutive failures
+            if self.consecutive_failures > 10 {
+                error!("Too many consecutive failures ({}), stopping playback", self.consecutive_failures);
+                self.stop();
+                return;
+            }
+
             self.next(false);
             return;
         }
@@ -519,6 +541,9 @@ impl PlaybackThread {
                 panic!("couldn't play device")
             }
         }
+
+        // Reset consecutive failures counter since we successfully opened a file
+        self.consecutive_failures = 0;
 
         self.state = PlaybackState::Playing;
 

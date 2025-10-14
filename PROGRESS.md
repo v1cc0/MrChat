@@ -151,6 +151,24 @@
     - ✅ 首次运行时自动创建并初始化数据库
     - ✅ 迁移历史仍然通过 `mrchat_migrations` 表正确跟踪
   - 测试：从 `/tmp` 目录运行二进制文件成功创建数据库并应用所有 10 个迁移
+- **确保数据库迁移在启动时成功运行**：
+  - 问题：应用启动时未正确运行数据库迁移，导致后续查询失败
+  - 解决方案：在 `src/player/ui/app.rs` 中为两个数据库（`music.db` 和 `mrchat.db`）调用 `run_migrations()`
+  - 结果：✅ 应用启动时自动创建表结构，数据库正常工作
+- **修复播放线程无限递归导致的栈溢出**：
+  - **问题**：当数据库中 track 的 `location` 字段为空字符串时，播放线程陷入无限递归导致栈溢出
+  - **表现**：日志显示大量 "Opening: """ 和 "Cannot open file: path is empty"，最终 "thread 'playback' has overflowed its stack"
+  - **根本原因**：
+    - `open()` 函数检测到空路径后调用 `self.next(false)` 尝试下一首
+    - `next()` 函数又调用 `self.open(&path)` 打开下一首
+    - 当队列中所有路径都为空时，形成 `open() → next() → open() → next()...` 无限循环
+  - **解决方案**（src/player/playback/thread.rs:109-151, 417-550）：
+    - 添加 `consecutive_failures: usize` 字段跟踪连续失败次数
+    - 在 `open()` 中遇到空路径或不存在的文件时增加计数器
+    - 当连续失败超过 10 次时，调用 `self.stop()` 停止播放而不是继续尝试
+    - 成功打开文件后重置计数器为 0
+  - **结果**：✅ 播放线程遇到无效路径时不再无限递归，最多尝试 10 次后自动停止
+  - **后续**：需要调查为什么数据库中的 `location` 字段会是空字符串（可能是扫描时的 bug）
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
