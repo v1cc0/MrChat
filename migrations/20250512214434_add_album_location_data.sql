@@ -1,5 +1,5 @@
--- just set this to "none" if there isn't one for now
-ALTER TABLE album ADD mbid TEXT DEFAULT "none" NOT NULL;
+-- just set this to 'none' if there isn't one for now
+ALTER TABLE album ADD mbid TEXT DEFAULT 'none' NOT NULL;
 
 CREATE TABLE IF NOT EXISTS album_path (
     album_id INTEGER NOT NULL,
@@ -9,8 +9,7 @@ CREATE TABLE IF NOT EXISTS album_path (
     PRIMARY KEY (album_id, disc_num)
 );
 
-DROP INDEX album_title_artist_id_idx;
-
+-- libSQL does not permit dropping the earlier UNIQUE index; keep it and add the new one alongside.
 CREATE UNIQUE INDEX IF NOT EXISTS album_title_artist_mbid ON album (title, artist_id, mbid);
 
 -- Trigger removed: libSQL/Turso does not support CREATE TRIGGER.

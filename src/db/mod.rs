@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use std::fs;
 
+use tracing::warn;
 use turso::{Connection, Database, params::IntoParams};
 use turso_core::types::FromValue;
 
@@ -43,18 +44,78 @@ impl TursoDatabase {
 
         entries.sort_by_key(|entry| entry.path());
 
+        let conn = self.connect()?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS mrchat_migrations (
+                filename TEXT PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+            (),
+        )
+        .await
+        .context("failed to ensure mrchat_migrations bookkeeping table")?;
+
         for entry in entries {
             let path = entry.path();
             let sql = fs::read_to_string(&path)
                 .with_context(|| format!("failed to read migration {:?}", path))?;
 
-            let conn = self.connect()?;
-            conn.execute_batch(sql.as_str()).await.with_context(|| {
-                format!(
-                    "failed to execute migration {:?}",
-                    path.file_name().unwrap()
+            let filename = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .context("migration file missing filename")?;
+
+            let already_applied = conn
+                .query_scalar_optional::<i64>(
+                    "SELECT 1 FROM mrchat_migrations WHERE filename = $1",
+                    (filename.as_str(),),
                 )
-            })?;
+                .await
+                .with_context(|| format!("failed to check migration history for {:?}", filename))?;
+
+            if already_applied.is_some() {
+                continue;
+            }
+
+            let execution = conn.execute_batch(sql.as_str()).await;
+
+            match execution {
+                Ok(()) => {}
+                Err(err) => {
+                    let mut benign = false;
+                    let mut cause_message = String::new();
+
+                    for cause in err.chain() {
+                        let msg = cause.to_string();
+                        if msg.contains("duplicate column name") || msg.contains("already exists") {
+                            benign = true;
+                            cause_message = msg;
+                            break;
+                        }
+
+                        // Keep the deepest cause for diagnostics if nothing matches.
+                        cause_message = msg;
+                    }
+
+                    if benign {
+                        warn!(
+                            "skipping migration {:?} because it appears already applied: {}",
+                            filename, cause_message
+                        );
+                    } else {
+                        return Err(err)
+                            .context(format!("failed to execute migration {:?}", filename));
+                    }
+                }
+            }
+
+            conn.execute(
+                "INSERT INTO mrchat_migrations (filename) VALUES ($1)",
+                (filename.as_str(),),
+            )
+            .await
+            .with_context(|| format!("failed to record migration {:?}", filename))?;
         }
 
         Ok(())
@@ -104,12 +165,7 @@ impl TursoConnection {
         Ok(buffer)
     }
 
-    pub async fn query_one<T, F>(
-        &self,
-        sql: &str,
-        params: impl IntoParams,
-        f: F,
-    ) -> Result<T>
+    pub async fn query_one<T, F>(&self, sql: &str, params: impl IntoParams, f: F) -> Result<T>
     where
         F: FnOnce(&turso::Row) -> Result<T>,
     {
@@ -169,6 +225,7 @@ impl TursoConnection {
     /// Execute a query and return the last inserted row ID
     pub async fn execute_returning_id(&self, sql: &str, params: impl IntoParams) -> Result<i64> {
         self.execute(sql, params).await?;
-        self.query_scalar::<i64>("SELECT last_insert_rowid()", ()).await
+        self.query_scalar::<i64>("SELECT last_insert_rowid()", ())
+            .await
     }
 }

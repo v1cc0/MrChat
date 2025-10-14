@@ -23,7 +23,7 @@
   - 从 `Cargo.toml` 移除 `sqlx` 依赖，添加 `turso` 和 `turso_core` 依赖
   - 为 `TursoDatabase` 添加 `Clone` trait 和多个辅助查询方法（`query_one`, `query_optional`, `query_scalar`, `query_map` 等）
   - 完全重写 `src/library/types.rs`，移除所有 sqlx derive 宏，为所有类型添加手动 `from_row()` 方法
-  - 完全重写 `src/library/db.rs`，将所有 `sqlx::query_as` 调用转换为 Turso API
+- 完全重写 `src/library/db.rs`，将所有 `sqlx::query_as` 调用转换为 Turso API
   - 更新 `src/ui/app.rs`，采用分离的数据库架构：
     - **`music.db`**: 音乐库功能（扫描、播放、专辑封面等）
     - **`mrchat.db`**: AI 聊天功能（会话、消息等）
@@ -32,6 +32,8 @@
 - 修复类型转换问题：`DateTime<Utc>` 转换为 timestamp，`Vec<u8>` 转换为 `Box<[u8]>`
 - 项目成功编译，所有 sqlx 依赖已完全移除
 - 移除 Turso 不支持的数据库触发器迁移，转而在扫描线程的删除逻辑中手动清理 `album`、`artist`、`album_path` 依赖，确保迁移可执行且库表保持一致性。
+- 为 `TursoDatabase::run_migrations` 引入 `mrchat_migrations` 记录表，按文件粒度跳过已执行迁移，并在检测到重复列/索引时给出告警而不中断。
+- 调整迁移脚本以满足 libSQL 要求：`mbid` 默认值改用单引号常量，并保留旧的专辑唯一索引以绕过 DROP 限制，保证现有库可顺利升级。
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
@@ -45,3 +47,4 @@
 - 拆分聊天服务错误处理/日志策略，补充落地的 tracing 输出格式。
 - 测试数据库迁移的功能完整性（library 扫描、封面加载等）。
 - 为音乐库删除路径补充集成测试/回归案例，验证手动级联清理行为（album/artist/album_path）。
+- 排查 playlist 初始化数据解析失败（`created_at` 字段格式），补充兼容逻辑。
