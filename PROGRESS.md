@@ -8,6 +8,7 @@
 - 修复播放列表加载失败：新增通用 `parse_timestamp` 解析函数覆盖 SQLite/Turso 默认时间格式，批量替换 `created_at` 字段解析，并修正播放列表聚合查询列顺序与分组。
 - 统一品牌标识：窗口标题、菜单、About/MPRIS/音频设备等用户可见文案更新为 “MrChat”，同时应用 ID 切换为 `org.v1cc0.mrchat`。
 - 统一数据目录：所有数据库、配置与缓存改为写入 `~/.local/share/mrchat/`，并在缺失配置时回退检查当前目录、提示用户并弹出配置向导窗口。
+- 修复音乐库扫描写入锁：为本地 Turso 启用 WAL + busy_timeout，并为元数据更新新增锁重试逻辑，避免 “database is locked” 导致的批量插入失败。
 - 规避空库统计崩溃：`track_stats` 查询使用 `COALESCE`，`TrackStats::from_row` 对 `total_duration` 为空时回落为 0。
 - 读取并梳理 `src/ui`、`src/settings`、`src/services`、`src/media` 等核心模块的职责。
 - 识别出 `gpui` 驱动的组件体系（按钮、输入框、模态框、主题）可作为聊天界面的基础。

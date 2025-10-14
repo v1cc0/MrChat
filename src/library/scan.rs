@@ -6,11 +6,12 @@ use std::{
 };
 
 use ahash::AHashMap;
+use anyhow::Context;
 use async_channel::{Receiver, Sender};
 use globwalk::GlobWalkerBuilder;
 use gpui::{App, Global};
 use image::{DynamicImage, EncodableLayout, codecs::jpeg::JpegEncoder, imageops::thumbnail};
-use smol::block_on;
+use smol::{Timer, block_on};
 use tracing::{debug, error, info, warn};
 
 use crate::db::{TursoConnection, TursoDatabase};
@@ -190,6 +191,11 @@ fn scan_path_for_album_art(path: &Path) -> Option<Box<[u8]>> {
         }
     }
     None
+}
+
+fn is_db_locked(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().contains("database is locked"))
 }
 
 impl ScanThread {
@@ -520,7 +526,13 @@ impl ScanThread {
                 ),
                 |row| Ok(row.get::<i64>(0)?),
             )
-            .await?;
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to insert album: title={:?} artist_id={:?} mbid={:?}",
+                    album, artist_id, mbid
+                )
+            })?;
 
         Ok(Some(id))
     }
@@ -595,24 +607,44 @@ impl ScanThread {
         Ok(())
     }
 
-    async fn update_metadata(
+    async fn update_metadata_once(
         &mut self,
-        metadata: (Metadata, u64, Option<Box<[u8]>>),
+        metadata: &FileInformation,
         path: &Path,
     ) -> anyhow::Result<()> {
+        let (meta, length, image) = metadata;
+
         debug!(
             "Adding/updating record for {:?} - {:?}",
-            metadata.0.artist, metadata.0.name
+            meta.artist, meta.name
         );
 
-        let artist_id = self.insert_artist(&metadata.0).await?;
-        let album_id = self
-            .insert_album(&metadata.0, artist_id, &metadata.2)
-            .await?;
-        self.insert_track(&metadata.0, album_id, path, metadata.1)
-            .await?;
+        let artist_id = self.insert_artist(meta).await?;
+        let album_id = self.insert_album(meta, artist_id, image).await?;
+        self.insert_track(meta, album_id, path, *length).await?;
 
         Ok(())
+    }
+
+    async fn update_metadata(
+        &mut self,
+        metadata: FileInformation,
+        path: &Path,
+    ) -> anyhow::Result<()> {
+        const MAX_RETRY: usize = 5;
+        for attempt in 0..=MAX_RETRY {
+            match self.update_metadata_once(&metadata, path).await {
+                Ok(()) => return Ok(()),
+                Err(err) if is_db_locked(&err) && attempt < MAX_RETRY => {
+                    let delay_ms = 50 * (attempt as u64 + 1);
+                    Timer::after(std::time::Duration::from_millis(delay_ms)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        // Should be unreachable because loop returns on success or final error
+        Err(anyhow::anyhow!("database locked after retries"))
     }
 
     fn read_metadata_for_path(&mut self, path: &PathBuf) -> Option<FileInformation> {
@@ -667,8 +699,8 @@ impl ScanThread {
 
             if let Err(err) = result {
                 error!(
-                    "Failed to update metadata for file: {:?}, error: {}",
-                    path, err
+                    "Failed to update metadata for file: {:?}, error: {err:#?}",
+                    path
                 );
             }
 

@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use std::fs;
 
+use smol::block_on;
 use tracing::warn;
 use turso::{Connection, Database, params::IntoParams};
 use turso_core::types::FromValue;
@@ -18,6 +19,14 @@ impl TursoDatabase {
             .build()
             .await
             .context("failed to open local Turso database")?;
+
+        let conn = db
+            .connect()
+            .context("failed to connect to turso database for pragma setup")?;
+        conn.execute("PRAGMA journal_mode = WAL", ())
+            .await
+            .context("failed to enable WAL mode")?;
+
         Ok(Self { inner: db })
     }
 
@@ -26,6 +35,8 @@ impl TursoDatabase {
             .inner
             .connect()
             .context("failed to connect to turso database")?;
+        block_on(async { conn.execute("PRAGMA busy_timeout = 5000", ()).await })
+            .context("failed to set busy timeout")?;
         Ok(TursoConnection { inner: conn })
     }
 
