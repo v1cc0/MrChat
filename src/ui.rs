@@ -4,6 +4,7 @@ mod arguments;
 mod assets;
 mod caching;
 pub mod components;
+mod config;
 mod constants;
 mod controls;
 pub mod data;

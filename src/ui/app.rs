@@ -1,14 +1,14 @@
 use core::panic;
 use std::{
-    fs,
-    path::PathBuf,
+    env, fs,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 
 use directories::ProjectDirs;
 use gpui::*;
 use prelude::FluentBuilder;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     config::{AppConfig, AppConfigGlobal},
@@ -28,6 +28,7 @@ use super::{
     about::about_dialog,
     arguments::parse_args_and_prepare,
     components::{input, modal},
+    config::config_dialog,
     constants::APP_ROUNDING,
     controls::Controls,
     data::create_album_cache,
@@ -50,6 +51,8 @@ struct WindowShadow {
     pub chat_overview: Entity<ChatOverview>,
     pub show_queue: Entity<bool>,
     pub show_about: Entity<bool>,
+    pub show_config: Entity<bool>,
+    pub config_path: Arc<PathBuf>,
 }
 
 impl Render for WindowShadow {
@@ -65,6 +68,8 @@ impl Render for WindowShadow {
         let queue = self.queue.clone();
         let show_queue_flag = *self.show_queue.read(cx);
         let show_about = *self.show_about.clone().read(cx);
+        let show_config = *self.show_config.clone().read(cx);
+        let config_path = self.config_path.clone();
         let chat_overview = self.chat_overview.clone();
 
         let mut element = div()
@@ -236,6 +241,13 @@ impl Render for WindowShadow {
                     })
                     .child(self.controls.clone())
                     .child(self.search.clone())
+                    .when(show_config, move |this| {
+                        let path = config_path.clone();
+                        this.child(config_dialog(path, &|_, cx| {
+                            let show_config = cx.global::<Models>().show_config.clone();
+                            show_config.write(cx, false);
+                        }))
+                    })
                     .when(show_about, |this| {
                         this.child(about_dialog(&|_, cx| {
                             let show_about = cx.global::<Models>().show_about.clone();
@@ -316,15 +328,44 @@ pub struct Pool(pub TursoDatabase);
 impl Global for Pool {}
 
 pub fn get_dirs() -> ProjectDirs {
-    let secondary_dirs = directories::ProjectDirs::from("me", "william341", "muzak")
-        .expect("couldn't generate project dirs (secondary)");
+    directories::ProjectDirs::from("org", "v1cc0", "mrchat")
+        .expect("couldn't generate project dirs")
+}
 
-    if secondary_dirs.data_dir().exists() {
-        return secondary_dirs;
+enum ConfigLoadSource {
+    DataDir,
+    CopiedFromWorkingDir,
+    WorkingDir,
+    Missing,
+}
+
+fn load_app_config(config_path: &Path) -> (AppConfig, ConfigLoadSource) {
+    if config_path.exists() {
+        return (AppConfig::load(config_path), ConfigLoadSource::DataDir);
     }
 
-    directories::ProjectDirs::from("org", "mailliw", "hummingbird")
-        .expect("couldn't generate project dirs")
+    if let Ok(cwd) = env::current_dir() {
+        let cwd_config = cwd.join("config.toml");
+        if cwd_config.exists() {
+            match fs::copy(&cwd_config, config_path) {
+                Ok(_) => {
+                    return (
+                        AppConfig::load(config_path),
+                        ConfigLoadSource::CopiedFromWorkingDir,
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "配置文件从工作目录复制到数据目录失败（src: {:?}, dst: {:?}）：{err:?}",
+                        cwd_config, config_path
+                    );
+                    return (AppConfig::load(&cwd_config), ConfigLoadSource::WorkingDir);
+                }
+            }
+        }
+    }
+
+    (AppConfig::default(), ConfigLoadSource::Missing)
 }
 
 pub struct DropImageDummyModel;
@@ -364,8 +405,27 @@ pub async fn run() {
     }
 
     let config_path = directory.join("config.toml");
-    let app_config = AppConfig::load(&config_path);
-    let app_config = Arc::new(app_config);
+    let (app_config_value, config_source) = load_app_config(&config_path);
+    match config_source {
+        ConfigLoadSource::DataDir => debug!("加载配置：{}", config_path.display()),
+        ConfigLoadSource::CopiedFromWorkingDir => {
+            info!(
+                "检测到工作目录配置文件，已复制到数据目录：{}",
+                config_path.display()
+            );
+        }
+        ConfigLoadSource::WorkingDir => warn!(
+            "正在使用工作目录下的配置文件；请将其移动到 {}",
+            config_path.display()
+        ),
+        ConfigLoadSource::Missing => warn!(
+            "未检测到配置文件：{}，将使用默认配置并提示用户创建。",
+            config_path.display()
+        ),
+    }
+    let config_missing = matches!(config_source, ConfigLoadSource::Missing);
+    let app_config = Arc::new(app_config_value);
+    let config_path_arc = Arc::new(config_path.clone());
 
     let db_for_chat = Arc::new(chat_db.clone());
     let app_config_for_closure = app_config.clone();
@@ -408,6 +468,7 @@ pub async fn run() {
                     position: 0,
                 },
                 &storage_data,
+                config_missing,
             );
 
             input::bind_actions(cx);
@@ -494,8 +555,14 @@ pub async fn run() {
 
                         let show_queue = cx.new(|_| true);
                         let show_about = cx.global::<Models>().show_about.clone();
+                        let show_config = cx.global::<Models>().show_config.clone();
 
                         cx.observe(&show_about, |_, _, cx| {
+                            cx.notify();
+                        })
+                        .detach();
+
+                        cx.observe(&show_config, |_, _, cx| {
                             cx.notify();
                         })
                         .detach();
@@ -509,6 +576,8 @@ pub async fn run() {
                             chat_overview: ChatOverview::create(cx),
                             show_queue,
                             show_about,
+                            show_config,
+                            config_path: config_path_arc.clone(),
                         }
                     })
                 },

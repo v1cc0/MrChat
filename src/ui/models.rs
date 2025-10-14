@@ -53,6 +53,7 @@ pub struct Models {
     pub lastfm: Entity<LastFMState>,
     pub switcher_model: Entity<VecDeque<ViewSwitchMessage>>,
     pub show_about: Entity<bool>,
+    pub show_config: Entity<bool>,
     pub playlist_tracker: Entity<PlaylistInfoTransfer>,
 }
 
@@ -126,7 +127,12 @@ pub enum PlaylistEvent {
 
 impl EventEmitter<PlaylistEvent> for PlaylistInfoTransfer {}
 
-pub fn build_models(cx: &mut App, queue: Queue, storage_data: &StorageData) {
+pub fn build_models(
+    cx: &mut App,
+    queue: Queue,
+    storage_data: &StorageData,
+    show_config_initial: bool,
+) {
     debug!("Building models");
     let metadata: Entity<Metadata> = cx.new(|_| Metadata::default());
     let albumart: Entity<Option<Arc<RenderImage>>> = cx.new(|_| None);
@@ -134,6 +140,7 @@ pub fn build_models(cx: &mut App, queue: Queue, storage_data: &StorageData) {
     let scan_state: Entity<ScanEvent> = cx.new(|_| ScanEvent::ScanCompleteIdle);
     let mmbs: Entity<MMBSList> = cx.new(|_| MMBSList(AHashMap::new()));
     let show_about: Entity<bool> = cx.new(|_| false);
+    let show_config: Entity<bool> = cx.new(|_| show_config_initial);
     let lastfm: Entity<LastFMState> = cx.new(|cx| {
         let dirs = get_dirs();
         let directory = dirs.data_dir().to_path_buf();
@@ -233,6 +240,7 @@ pub fn build_models(cx: &mut App, queue: Queue, storage_data: &StorageData) {
         lastfm,
         switcher_model,
         show_about,
+        show_config,
         playlist_tracker,
     });
 
