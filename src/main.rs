@@ -4,20 +4,12 @@
     windows_subsystem = "windows"
 )]
 
-use services::mmb::lastfm::{LASTFM_API_KEY, LASTFM_API_SECRET};
+use player::services::mmb::lastfm::{LASTFM_API_KEY, LASTFM_API_SECRET};
 use smol_macros::main;
 
-mod config;
-mod db;
-mod devices;
-mod library;
-mod media;
-mod modules;
-mod playback;
-mod services;
-mod settings;
-mod ui;
-mod util;
+mod chat;
+mod player;
+mod shared;
 
 main! {
     async fn main() {
@@ -32,6 +24,6 @@ main! {
             tracing::warn!("Binary not compiled with LastFM support, set LASTFM_API_KEY and LASTFM_API_SECRET at compile time to enable");
         }
 
-        crate::ui::app::run().await;
+        crate::player::ui::app::run().await;
     }
 }
