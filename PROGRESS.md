@@ -129,6 +129,15 @@
     - **更好的可维护性**：模块边界清晰，依赖关系明确
     - **更容易测试**：每个模块可以独立测试
     - **为未来扩展奠定基础**：新功能可以轻松添加到对应模块
+- **修复播放线程空路径 panic**：
+  - 问题：数据库中某些 track 记录的 `location` 字段为空字符串，导致播放时在 `src/player/playback/thread.rs:444` 尝试打开空路径文件而 panic
+  - 表现：日志显示 `Opening: ""` 后出现 "No such file or directory" 错误并 panic
+  - 根本原因：`open()` 函数未验证路径有效性，直接调用 `std::fs::File::open(path).expect()`
+  - 解决方案（src/player/playback/thread.rs:417-428）：
+    - 在打开文件前检查路径是否为空（`path.as_os_str().is_empty()`）
+    - 检查文件是否存在（`path.exists()`）
+    - 对无效路径记录错误日志并自动跳到下一首歌曲（`self.next(false)`），避免中断播放
+  - 结果：✅ 播放线程遇到无效路径时优雅降级，不再 panic
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

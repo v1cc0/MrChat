@@ -414,6 +414,19 @@ impl PlaybackThread {
     fn open(&mut self, path: &PathBuf) {
         info!("Opening: {:?}", path);
 
+        // Check if path is empty or invalid
+        if path.as_os_str().is_empty() {
+            error!("Cannot open file: path is empty");
+            self.next(false);
+            return;
+        }
+
+        if !path.exists() {
+            error!("Cannot open file: path does not exist: {:?}", path);
+            self.next(false);
+            return;
+        }
+
         let mut recreation_required = false;
 
         if self.state == PlaybackState::Paused {
