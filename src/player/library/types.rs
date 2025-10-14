@@ -287,13 +287,14 @@ impl Track {
                 let raw = row.get::<String>(7).context("failed to get created_at")?;
                 parse_timestamp(&raw).context("failed to parse created_at")?
             },
-            genres: None,
-            tags: None,
-            location: PathBuf::from(row.get::<String>(8).context("failed to get location")?),
+            genres: None,  // Column 8: genres (not parsed yet)
+            tags: None,    // Column 9: tags (not parsed yet)
+            location: PathBuf::from(row.get::<String>(10).context("failed to get location")?),
             artist_names: row
-                .get::<Option<String>>(9)
+                .get::<Option<String>>(11)
                 .context("failed to get artist_names")?
                 .map(DBString::from),
+            // Column 12: folder (not used in struct)
         })
     }
 }
