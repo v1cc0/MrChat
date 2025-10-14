@@ -103,6 +103,32 @@
   - **根本问题**：turso crate 0.2.2 的参数绑定实现存在严重 bug，无法可靠处理混合类型的元组参数
   - **性能考量**：SQL 字面值方式稍慢于参数绑定，但在音乐库扫描场景下影响可忽略（单次扫描仅发生一次）
   - **长期建议**：考虑向 turso 项目提交 issue，或在 turso crate 修复后恢复参数绑定以提升性能
+- **完成代码模块重构 - 三层架构拆分**：
+  - 目标：将混乱的单层 `src/` 结构重组为清晰的三模块架构：`chat/`、`shared/`、`player/`
+  - 实施步骤：
+    - 创建三个新目录：`src/chat/`、`src/shared/`、`src/player/`
+    - 使用 `git mv` 移动所有文件以保留 Git 历史：
+      - `src/modules/chat/*` → `src/chat/`（聊天模块：models, services, storage, ui）
+      - `src/config.rs`, `src/db/`, `src/settings/`, `src/ui/components/`, `src/util.rs` → `src/shared/`（共享组件）
+      - `src/devices/`, `src/library/`, `src/media/`, `src/playback/`, `src/services/`, `src/ui/` → `src/player/`（播放器模块）
+    - 为每个新模块创建 `mod.rs` 文件，定义清晰的公共接口
+    - 更新 `main.rs` 以使用新的模块路径（`mod chat; mod player; mod shared;`）
+  - 导入路径修复：
+    - **问题**：Agent 的批量 sed 替换导致 785 个错误（将 `gpui::` 错误替换为 `gpplayer::ui::`，产生重复前缀）
+    - **解决方案**：手动精确修复 + Agent 辅助，将错误从 785 → 46 → 33 → 27 → 0
+    - 修复模式：
+      - `player::player::` → `player::`（删除重复前缀）
+      - `shared::shared::` → `shared::`（删除重复前缀）
+      - `gpplayer::ui::` → `gpui::`（恢复正确的框架名称）
+      - `devices::shared::util` → `player::devices::util`（修正跨模块引用）
+      - `library::` → `crate::player::library::`（补全完整路径）
+      - `crate::player::crate::player::` → `crate::player::`（修复双重 crate 前缀）
+  - 结果：**编译成功，0 个错误**，仅剩 33 个未使用代码警告（正常的开发阶段警告）
+  - 好处：
+    - **清晰的关注点分离**：聊天、播放器、共享组件各自独立
+    - **更好的可维护性**：模块边界清晰，依赖关系明确
+    - **更容易测试**：每个模块可以独立测试
+    - **为未来扩展奠定基础**：新功能可以轻松添加到对应模块
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
