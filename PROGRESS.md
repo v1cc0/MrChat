@@ -189,19 +189,25 @@
       - folder: 第 12 列（不在结构体中，忽略）
   - **结果**：✅ 播放功能完全正常，所有歌曲路径正确加载
   - **教训**：使用 `SELECT *` 时必须严格匹配表的实际列顺序，建议在数据库 schema 变更后及时更新所有 from_row 实现
-- **调试暂停/停止功能问题**：
-  - **问题**：用户报告播放功能正常，但暂停和停止按钮不起作用
-  - **调查过程**：
-    - 检查 UI 按钮事件绑定（src/player/ui/controls.rs）：✅ 正确分发 PlayPause action
-    - 检查 GPUIPlaybackInterface 实现（src/player/playback/interface.rs）：✅ pause() 和 stop() 正确发送命令
-    - 检查 playback thread 命令处理（src/player/playback/thread.rs）：✅ command_intake() 正确匹配和调用
-    - 检查 pause() 和 stop() 函数实现：✅ 逻辑正确
-  - **添加调试日志**（待测试）：
+- **修复暂停/停止按钮事件穿透问题**：
+  - **问题**：用户报告播放功能正常，但点击暂停/停止按钮不起作用，反而导致右侧边栏移动
+  - **根本原因**：
+    - PlaybackSection 使用绝对定位 (`.absolute()`) 居中显示播放控制按钮
+    - 虽然按钮有 `on_mouse_down` 中的 `cx.stop_propagation()`，但 `on_click` 处理器中没有阻止事件传播
+    - 点击事件穿透到下层元素，被队列按钮（右侧菜单按钮）捕获，导致侧边栏打开/关闭
+  - **解决方案**（src/player/ui/controls.rs）：
+    - 在所有播放控制按钮的 `on_click` 处理器中添加 `cx.stop_propagation()`：
+      - Previous 按钮（299行）
+      - Play/Pause 按钮（322行）
+      - Next 按钮（350行）
+      - Shuffle 按钮（270行）
+      - Repeat 按钮（381行）
+  - **调试日志**（保留用于将来调试）：
     - global_actions.rs:75-93：记录 PlayPause action 触发和状态判断
     - thread.rs:293：记录所有接收到的命令
     - thread.rs:318-325：记录 pause() 调用和状态变化
     - thread.rs:877-883：记录 stop() 调用
-  - **状态**：调试日志已添加并编译成功，等待用户运行应用测试并查看日志输出
+  - **结果**：✅ 修复编译成功，现在点击事件不会穿透到其他元素
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

@@ -267,6 +267,7 @@ impl Render for PlaybackSection {
                         window.prevent_default();
                     })
                     .on_click(|_, _, cx| {
+                        cx.stop_propagation();
                         cx.global::<GPUIPlaybackInterface>().toggle_shuffle();
                     })
                     .child(icon(SHUFFLE).size(px(14.0)).when(*shuffling, |this| {
@@ -296,6 +297,7 @@ impl Render for PlaybackSection {
                                 window.prevent_default();
                             })
                             .on_click(|_, window, cx| {
+                                cx.stop_propagation();
                                 window.dispatch_action(Box::new(Previous), cx);
                             })
                             .child(icon(PREV_TRACK).size(px(16.0))),
@@ -319,6 +321,7 @@ impl Render for PlaybackSection {
                                 window.prevent_default();
                             })
                             .on_click(|_, window, cx| {
+                                cx.stop_propagation();
                                 window.dispatch_action(Box::new(PlayPause), cx);
                             })
                             .when(*state == PlaybackState::Playing, |div| {
@@ -345,6 +348,7 @@ impl Render for PlaybackSection {
                                 window.prevent_default();
                             })
                             .on_click(|_, window, cx| {
+                                cx.stop_propagation();
                                 window.dispatch_action(Box::new(Next), cx);
                             })
                             .child(icon(NEXT_TRACK).size(px(16.0))),
@@ -373,16 +377,19 @@ impl Render for PlaybackSection {
                                     cx.stop_propagation();
                                     window.prevent_default();
                                 })
-                                .on_click(move |_, _, cx| match repeating {
-                                    RepeatState::NotRepeating => cx
-                                        .global::<GPUIPlaybackInterface>()
-                                        .set_repeat(RepeatState::Repeating),
-                                    RepeatState::Repeating => cx
-                                        .global::<GPUIPlaybackInterface>()
-                                        .set_repeat(RepeatState::RepeatingOne),
-                                    RepeatState::RepeatingOne => cx
-                                        .global::<GPUIPlaybackInterface>()
-                                        .set_repeat(RepeatState::NotRepeating),
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    match repeating {
+                                        RepeatState::NotRepeating => cx
+                                            .global::<GPUIPlaybackInterface>()
+                                            .set_repeat(RepeatState::Repeating),
+                                        RepeatState::Repeating => cx
+                                            .global::<GPUIPlaybackInterface>()
+                                            .set_repeat(RepeatState::RepeatingOne),
+                                        RepeatState::RepeatingOne => cx
+                                            .global::<GPUIPlaybackInterface>()
+                                            .set_repeat(RepeatState::NotRepeating),
+                                    }
                                 })
                                 .child(
                                     icon(match repeating {
