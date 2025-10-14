@@ -13,7 +13,7 @@ use image::{DynamicImage, EncodableLayout, codecs::jpeg::JpegEncoder, imageops::
 use smol::block_on;
 use tracing::{debug, error, info, warn};
 
-use crate::db::TursoDatabase;
+use crate::db::{TursoConnection, TursoDatabase};
 
 use crate::{
     media::{
@@ -127,6 +127,12 @@ pub struct ScanThread {
     scan_record_path: Option<PathBuf>,
     scanned: u64,
     discovered_total: u64,
+}
+
+struct TrackCleanupContext {
+    album_id: Option<i64>,
+    disc_key: i64,
+    folder: Option<String>,
 }
 
 fn build_provider_table() -> Vec<(&'static [&'static str], Box<dyn MediaProvider>)> {
@@ -387,22 +393,29 @@ impl ScanThread {
         let conn = self.pool.connect()?;
 
         // Try to insert, returns id if successful, None if conflict
-        let result = conn.query_optional(
-            include_str!("../../queries/scan/create_artist.sql"),
-            (artist.as_str(), metadata.artist_sort.as_ref().unwrap_or(&artist).as_str()),
-            |row| Ok(row.get::<i64>(0)?)
-        ).await?;
+        let result = conn
+            .query_optional(
+                include_str!("../../queries/scan/create_artist.sql"),
+                (
+                    artist.as_str(),
+                    metadata.artist_sort.as_ref().unwrap_or(&artist).as_str(),
+                ),
+                |row| Ok(row.get::<i64>(0)?),
+            )
+            .await?;
 
         if let Some(id) = result {
             return Ok(Some(id));
         }
 
         // Artist already exists, fetch the id
-        let id = conn.query_one(
-            include_str!("../../queries/scan/get_artist_id.sql"),
-            (artist.as_str(),),
-            |row| Ok(row.get::<i64>(0)?)
-        ).await?;
+        let id = conn
+            .query_one(
+                include_str!("../../queries/scan/get_artist_id.sql"),
+                (artist.as_str(),),
+                |row| Ok(row.get::<i64>(0)?),
+            )
+            .await?;
 
         Ok(Some(id))
     }
@@ -425,11 +438,13 @@ impl ScanThread {
         let conn = self.pool.connect()?;
 
         // Check if album already exists
-        let existing = conn.query_optional(
-            include_str!("../../queries/scan/get_album_id.sql"),
-            (album.as_str(), mbid.as_str()),
-            |row| Ok(row.get::<i64>(0)?)
-        ).await?;
+        let existing = conn
+            .query_optional(
+                include_str!("../../queries/scan/get_album_id.sql"),
+                (album.as_str(), mbid.as_str()),
+                |row| Ok(row.get::<i64>(0)?),
+            )
+            .await?;
 
         if let Some(id) = existing {
             return Ok(Some(id));
@@ -460,51 +475,52 @@ impl ScanThread {
                     .expect("i don't know how Cursor could fail");
                 buf.flush().expect("could not flush buffer");
 
-                let resized =
-                    if decoded.dimensions().0 <= 1024 || decoded.dimensions().1 <= 1024 {
-                        image.clone().to_vec()
-                    } else {
-                        decoded = image::imageops::resize(
-                            &decoded,
-                            1024,
-                            1024,
-                            image::imageops::FilterType::Lanczos3,
-                        );
-                        let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
-                        let mut encoder = JpegEncoder::new_with_quality(&mut buf, 70);
+                let resized = if decoded.dimensions().0 <= 1024 || decoded.dimensions().1 <= 1024 {
+                    image.clone().to_vec()
+                } else {
+                    decoded = image::imageops::resize(
+                        &decoded,
+                        1024,
+                        1024,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                    let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+                    let mut encoder = JpegEncoder::new_with_quality(&mut buf, 70);
 
-                        encoder.encode(
-                            decoded.as_bytes(),
-                            decoded.width(),
-                            decoded.height(),
-                            image::ExtendedColorType::Rgb8,
-                        )?;
-                        buf.flush()?;
+                    encoder.encode(
+                        decoded.as_bytes(),
+                        decoded.width(),
+                        decoded.height(),
+                        image::ExtendedColorType::Rgb8,
+                    )?;
+                    buf.flush()?;
 
-                        buf.get_mut().clone()
-                    };
+                    buf.get_mut().clone()
+                };
 
                 (Some(resized), Some(buf.get_mut().clone()))
             }
             None => (None, None),
         };
 
-        let id = conn.query_one(
-            include_str!("../../queries/scan/create_album.sql"),
-            (
-                album.as_str(),
-                metadata.sort_album.as_ref().unwrap_or(album).as_str(),
-                artist_id,
-                resized_image,
-                thumb,
-                metadata.date.map(|d| d.timestamp()),
-                metadata.label.as_deref(),
-                metadata.catalog.as_deref(),
-                metadata.isrc.as_deref(),
-                mbid.as_str(),
-            ),
-            |row| Ok(row.get::<i64>(0)?)
-        ).await?;
+        let id = conn
+            .query_one(
+                include_str!("../../queries/scan/create_album.sql"),
+                (
+                    album.as_str(),
+                    metadata.sort_album.as_ref().unwrap_or(album).as_str(),
+                    artist_id,
+                    resized_image,
+                    thumb,
+                    metadata.date.map(|d| d.timestamp()),
+                    metadata.label.as_deref(),
+                    metadata.catalog.as_deref(),
+                    metadata.isrc.as_deref(),
+                    mbid.as_str(),
+                ),
+                |row| Ok(row.get::<i64>(0)?),
+            )
+            .await?;
 
         Ok(Some(id))
     }
@@ -525,11 +541,13 @@ impl ScanThread {
 
         let conn = self.pool.connect()?;
 
-        let existing_path = conn.query_optional(
-            include_str!("../../queries/scan/get_album_path.sql"),
-            (album_id, disc_num),
-            |row| Ok(row.get::<String>(0)?)
-        ).await?;
+        let existing_path = conn
+            .query_optional(
+                include_str!("../../queries/scan/get_album_path.sql"),
+                (album_id, disc_num),
+                |row| Ok(row.get::<String>(0)?),
+            )
+            .await?;
 
         match existing_path {
             Some(path) => {
@@ -540,8 +558,9 @@ impl ScanThread {
             None => {
                 conn.execute(
                     include_str!("../../queries/scan/create_album_path.sql"),
-                    (album_id, parent.to_str(), disc_num)
-                ).await?;
+                    (album_id, parent.to_str(), disc_num),
+                )
+                .await?;
             }
         }
 
@@ -569,8 +588,9 @@ impl ScanThread {
                 metadata.artist.as_deref(),
                 parent.to_str(),
             ),
-            |row| Ok(row.get::<i64>(0)?)
-        ).await?;
+            |row| Ok(row.get::<i64>(0)?),
+        )
+        .await?;
 
         Ok(())
     }
@@ -680,16 +700,128 @@ impl ScanThread {
             }
         };
 
-        let result = conn.execute(
-            include_str!("../../queries/scan/delete_track.sql"),
-            (path.to_str(),)
-        ).await;
+        let Some(path_str) = path.to_str() else {
+            error!(
+                "Failed to delete track: path is not valid UTF-8: {:?}",
+                path
+            );
+            return;
+        };
+
+        let track_context = match conn
+            .query_optional(
+                include_str!("../../queries/scan/get_track_cleanup_context.sql"),
+                (path_str,),
+                |row| {
+                    Ok(TrackCleanupContext {
+                        album_id: row.get::<Option<i64>>(0)?,
+                        disc_key: row.get::<i64>(1)?,
+                        folder: row.get::<Option<String>>(2)?,
+                    })
+                },
+            )
+            .await
+        {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                error!(
+                    "Database error while fetching track cleanup context for {:?}: {:?}",
+                    path, e
+                );
+                None
+            }
+        };
+
+        let result = conn
+            .execute(
+                include_str!("../../queries/scan/delete_track.sql"),
+                (path_str,),
+            )
+            .await;
 
         if let Err(e) = result {
             error!("Database error while deleting track: {:?}", e);
         } else {
             self.scan_record.remove(path);
+            if let Some(ctx) = track_context {
+                if let Err(e) = self.cleanup_track_removal(&conn, &ctx).await {
+                    error!(
+                        "Database error while cleaning up after track deletion {:?}: {:?}",
+                        path, e
+                    );
+                }
+            }
         }
+    }
+
+    async fn cleanup_track_removal(
+        &self,
+        conn: &TursoConnection,
+        ctx: &TrackCleanupContext,
+    ) -> anyhow::Result<()> {
+        let Some(album_id) = ctx.album_id else {
+            return Ok(());
+        };
+
+        if let Some(folder) = ctx.folder.as_deref() {
+            let remaining_in_folder: i64 = conn
+                .query_scalar(
+                    "SELECT COUNT(1) FROM track WHERE folder = $1 AND IFNULL(disc_number, -1) = $2 AND album_id = $3",
+                    (folder, ctx.disc_key, album_id),
+                )
+                .await?;
+
+            if remaining_in_folder == 0 {
+                conn.execute(
+                    "DELETE FROM album_path WHERE album_id = $1 AND path = $2 AND disc_num = $3",
+                    (album_id, folder, ctx.disc_key),
+                )
+                .await?;
+            }
+        }
+
+        let tracks_remaining: i64 = conn
+            .query_scalar(
+                "SELECT COUNT(1) FROM track WHERE album_id = $1",
+                (album_id,),
+            )
+            .await?;
+
+        if tracks_remaining > 0 {
+            return Ok(());
+        }
+
+        let artist_id: Option<i64> = conn
+            .query_scalar_optional("SELECT artist_id FROM album WHERE id = $1", (album_id,))
+            .await?;
+
+        conn.execute("DELETE FROM album_path WHERE album_id = $1", (album_id,))
+            .await?;
+
+        conn.execute(
+            include_str!("../../queries/scan/delete_album.sql"),
+            (album_id,),
+        )
+        .await?;
+
+        if let Some(artist_id) = artist_id {
+            let albums_remaining: i64 = conn
+                .query_scalar(
+                    "SELECT COUNT(1) FROM album WHERE artist_id = $1",
+                    (artist_id,),
+                )
+                .await?;
+
+            if albums_remaining == 0 {
+                conn.execute(
+                    include_str!("../../queries/scan/delete_artist.sql"),
+                    (artist_id,),
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
     }
 
     // This is done in one shot because it's required for data integrity

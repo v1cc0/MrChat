@@ -13,9 +13,4 @@ DROP INDEX album_title_artist_id_idx;
 
 CREATE UNIQUE INDEX IF NOT EXISTS album_title_artist_mbid ON album (title, artist_id, mbid);
 
-CREATE TRIGGER IF NOT EXISTS delete_album_paths AFTER DELETE ON album BEGIN
-DELETE FROM album_path
-WHERE
-    album_path.album_id = OLD.id;
-
-END;
+-- Trigger removed: libSQL/Turso does not support CREATE TRIGGER.
