@@ -217,9 +217,10 @@ impl Album {
             ),
             artist_id: row.get(3).context("failed to get artist_id")?,
             release_date: row
-                .get::<Option<String>>(4)
+                .get::<Option<i64>>(4)
                 .context("failed to get release_date")?
-                .and_then(|s| s.parse().ok()),
+                .map(|timestamp| DateTime::from_timestamp(timestamp, 0))
+                .flatten(),
             created_at: {
                 let raw = row.get::<String>(5).context("failed to get created_at")?;
                 parse_timestamp(&raw).context("failed to parse created_at")?

@@ -506,30 +506,44 @@ impl ScanThread {
             None => (None, None),
         };
 
-        let id = conn
-            .query_one(
-                include_str!("../../queries/scan/create_album.sql"),
-                (
-                    album.as_str(),
-                    metadata.sort_album.as_ref().unwrap_or(album).as_str(),
-                    artist_id,
-                    resized_image,
-                    thumb,
-                    metadata.date.map(|d| d.timestamp()),
-                    metadata.label.as_deref(),
-                    metadata.catalog.as_deref(),
-                    metadata.isrc.as_deref(),
-                    mbid.as_str(),
-                ),
-                |row| Ok(row.get::<i64>(0)?),
+        // Convert Option values to concrete values for parameter binding
+        // SQL will use NULLIF/CASE to convert special values back to NULL
+        let artist_id_val = artist_id.unwrap_or(0);
+        let image_val = resized_image.unwrap_or_else(Vec::new);
+        let thumb_val = thumb.unwrap_or_else(Vec::new);
+        let date_val = metadata.date.map(|d| d.timestamp()).unwrap_or(0);
+        let label_val = metadata.label.as_deref().unwrap_or("");
+        let catalog_val = metadata.catalog.as_deref().unwrap_or("");
+        let isrc_val = metadata.isrc.as_deref().unwrap_or("");
+
+        conn.execute(
+            include_str!("../../queries/scan/create_album.sql"),
+            (
+                album.as_str(),
+                metadata.sort_album.as_ref().unwrap_or(album).as_str(),
+                artist_id_val,
+                image_val,
+                thumb_val,
+                date_val,
+                label_val,
+                catalog_val,
+                isrc_val,
+                mbid.as_str(),
+            ),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to insert album: title={:?} artist_id={:?} mbid={:?}",
+                album, artist_id, mbid
             )
+        })?;
+
+        // Get the ID of the inserted/updated album
+        let id = conn
+            .query_scalar::<i64>("SELECT last_insert_rowid()", ())
             .await
-            .with_context(|| {
-                format!(
-                    "failed to insert album: title={:?} artist_id={:?} mbid={:?}",
-                    album, artist_id, mbid
-                )
-            })?;
+            .context("failed to get last inserted album id")?;
 
         Ok(Some(id))
     }
@@ -546,16 +560,22 @@ impl ScanThread {
             return Ok(());
         }
 
+        let album_id_unwrapped = album_id.unwrap();
         let disc_num = metadata.disc_current.map(|v| v as i64).unwrap_or(-1);
+        let track_num = metadata.track_current.map(|v| v as i64).unwrap_or(-1);
         let parent = path.parent().unwrap();
 
         let existing_path = conn
             .query_optional(
                 include_str!("../../queries/scan/get_album_path.sql"),
-                (album_id, disc_num),
+                (album_id_unwrapped, disc_num),
                 |row| Ok(row.get::<String>(0)?),
             )
             .await?;
+
+        let parent_str = parent
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("parent path contains invalid UTF-8: {:?}", parent))?;
 
         match existing_path {
             Some(path) => {
@@ -566,7 +586,7 @@ impl ScanThread {
             None => {
                 conn.execute(
                     include_str!("../../queries/scan/create_album_path.sql"),
-                    (album_id, parent.to_str(), disc_num),
+                    (album_id_unwrapped, parent_str, disc_num),
                 )
                 .await?;
             }
@@ -584,27 +604,41 @@ impl ScanThread {
 
         let path_str = path
             .to_str()
-            .ok_or_else(|| anyhow::anyhow!("path contains invalid UTF-8: {:?}", path))?;
+            .ok_or_else(|| anyhow::anyhow!("path contains invalid UTF-8: {:?}", path))?
+            .to_string();
 
-        let parent_str = parent
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("parent path contains invalid UTF-8: {:?}", parent))?;
+        let genre = metadata.genre.as_deref().unwrap_or("");
+        let artist = metadata.artist.as_deref().unwrap_or("");
 
-        conn.query_one(
-            include_str!("../../queries/scan/create_track.sql"),
+        // Use execute instead of query_one for INSERT
+        let sql = "INSERT INTO track (title, title_sortable, album_id, track_number, disc_number, duration, location, genres, artist_names, folder)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (location) DO UPDATE SET
+                title = EXCLUDED.title,
+                title_sortable = EXCLUDED.title_sortable,
+                album_id = EXCLUDED.album_id,
+                track_number = EXCLUDED.track_number,
+                disc_number = EXCLUDED.disc_number,
+                duration = EXCLUDED.duration,
+                location = EXCLUDED.location,
+                genres = EXCLUDED.genres,
+                artist_names = EXCLUDED.artist_names,
+                folder = EXCLUDED.folder";
+
+        conn.execute(
+            sql,
             (
-                name.as_str(),
-                name.as_str(),
-                album_id,
-                metadata.track_current.map(|x| x as i32),
-                metadata.disc_current.map(|x| x as i32),
-                length as i32,
-                path_str,
-                metadata.genre.as_deref(),
-                metadata.artist.as_deref(),
-                parent_str,
+                name.clone(),               // String - $1
+                name.clone(),               // String - $2
+                album_id_unwrapped,         // i64 - $3
+                track_num,                  // i64 - $4
+                disc_num,                   // i64 - $5
+                length as i64,              // i64 - $6
+                path_str.clone(),           // String - $7
+                genre.to_string(),          // String - $8
+                artist.to_string(),         // String - $9
+                parent_str.to_string(),     // String - $10
             ),
-            |row| Ok(row.get::<i64>(0)?),
         )
         .await?;
 

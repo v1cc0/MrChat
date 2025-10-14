@@ -382,6 +382,7 @@ pub async fn run() {
 
     // Create separate databases for music and chat functionality
     let music_db_path = directory.join("music.db");
+    tracing::info!("Opening music database at: {:?}", music_db_path);
     let music_db = match TursoDatabase::open_local(&music_db_path).await {
         Ok(db) => db,
         Err(err) => panic!(
@@ -391,6 +392,7 @@ pub async fn run() {
     };
 
     let chat_db_path = directory.join("mrchat.db");
+    tracing::info!("Opening chat database at: {:?}", chat_db_path);
     let chat_db = match TursoDatabase::open_local(&chat_db_path).await {
         Ok(db) => db,
         Err(err) => panic!(

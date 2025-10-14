@@ -41,6 +41,23 @@
 - 移除 Turso 不支持的数据库触发器迁移，转而在扫描线程的删除逻辑中手动清理 `album`、`artist`、`album_path` 依赖，确保迁移可执行且库表保持一致性。
 - 为 `TursoDatabase::run_migrations` 引入 `mrchat_migrations` 记录表，按文件粒度跳过已执行迁移，并在检测到重复列/索引时给出告警而不中断。
 - 调整迁移脚本以满足 libSQL 要求：`mbid` 默认值改用单引号常量，并保留旧的专辑唯一索引以绕过 DROP 限制，保证现有库可顺利升级。
+- **修复 SearchModel 生命周期 panic**：将 `src/ui/search/model.rs` 中的异步任务从使用 `.expect()` 改为优雅处理弱引用失败（`is_err()` 检查并退出循环），避免窗口关闭时后台任务访问已释放实体导致的 panic。
+- **修复数据库写入锁问题**：
+  - 强制 WAL 模式在数据库打开时必须成功启用，失败则返回错误而非 warn（src/db/mod.rs:28-34）
+  - 将 busy_timeout 从 5000ms 增加到 10000ms，提供更长的锁等待时间
+  - 优化扫描线程连接使用：整个 metadata 更新（artist/album/track）使用单个连接，减少 3x 连接开销和锁冲突机会
+  - 移除冗余的 `apply_pragmas` 函数，WAL 仅在数据库级别设置一次，busy_timeout 在每个连接上设置
+- **日志时间戳本地化**：将日志输出的时间戳从 UTC 改为系统本地时间，方便用户阅读（src/main.rs:24-27，启用 tracing-subscriber 的 local-time feature）
+- **修复 track.location NOT NULL 约束失败**：`insert_track` 中 `path.to_str()` 和 `parent.to_str()` 返回 `Option<&str>`，当为 None 时导致数据库收到 NULL 值而违反约束。现在添加显式错误处理，确保路径转换失败时立即报错而不是传递 NULL。
+- **修复 turso crate Option 参数绑定 panic**：
+  - 问题：`insert_album` 使用 `query_one` 传递包含 Option 类型的元组参数（Option<i64>、Option<Vec<u8>>、Option<&str>）时，turso crate 在参数绑定阶段 panic
+  - 根本原因：turso crate 0.2.2 无法正确处理元组中的 Option 类型参数，导致"invalid value type"错误
+  - 解决方案（src/library/scan.rs:509-546）：
+    - 将所有 Option 参数转换为具体值（artist_id → 0, image/thumb → 空Vec, label/catalog/isrc → 空字符串）
+    - 修改 SQL（queries/scan/create_album.sql）使用 NULLIF 和 CASE 将特殊值转回 NULL
+    - 将 `query_one` + RETURNING id 改为 `execute` + `last_insert_rowid()`
+    - 将 ON CONFLICT DO NOTHING 改为 DO UPDATE SET，确保冲突时也能获取 id
+  - 额外修复（src/library/types.rs:219-223）：`Album::from_row` 中 release_date 从 Option<String> 改为 Option<i64>，匹配数据库中的 timestamp 存储类型
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
@@ -49,7 +66,7 @@
 - 设计音乐模块与聊天界面的模块化隔离（启动/挂起/控制接口），确保互不干扰。
 - ~~评估并改造音乐库扫描/查询/缓存逻辑以适配 Turso API~~（已完成）
 - ~~实现 Turso 连接配置加载 + 健康检查命令，补齐 CRUD 基础~~（已完成）
-- 排查 SearchModel 在窗口退出时的弱引用崩溃，补充生命周期守卫。
+- ~~排查 SearchModel 在窗口退出时的弱引用崩溃，补充生命周期守卫~~（已完成）
 - 为聊天服务层提供最小 API（会话创建、消息写入）并准备集成测试框架。
 - 设计聊天 UI 原型并扩展 `ChatOverview`（新建会话、消息输入/流式呈现、错误提示）。
 - 拆分聊天服务错误处理/日志策略，补充落地的 tracing 输出格式。
