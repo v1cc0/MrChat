@@ -506,24 +506,32 @@ impl ScanThread {
             None => (None, None),
         };
 
-        // Convert Option values to concrete values for parameter binding
-        // SQL will use NULLIF/CASE to convert special values back to NULL
+        // WORKAROUND for turso crate 0.2.2 bug:
+        // Cannot mix Vec<u8> (BLOB) with other types in tuple parameters
+        // Solution: Split into two steps - insert basic fields, then update BLOBs
+
+        // Step 1: Insert basic fields without BLOBs
         let artist_id_val = artist_id.unwrap_or(0);
-        let image_val = resized_image.unwrap_or_else(Vec::new);
-        let thumb_val = thumb.unwrap_or_else(Vec::new);
         let date_val = metadata.date.map(|d| d.timestamp()).unwrap_or(0);
         let label_val = metadata.label.as_deref().unwrap_or("");
         let catalog_val = metadata.catalog.as_deref().unwrap_or("");
         let isrc_val = metadata.isrc.as_deref().unwrap_or("");
 
+        let insert_sql = "INSERT INTO album (title, title_sortable, artist_id, release_date, label, catalog_number, isrc, mbid)
+            VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)
+            ON CONFLICT (title, artist_id, mbid) DO UPDATE SET
+                title_sortable = EXCLUDED.title_sortable,
+                release_date = EXCLUDED.release_date,
+                label = EXCLUDED.label,
+                catalog_number = EXCLUDED.catalog_number,
+                isrc = EXCLUDED.isrc";
+
         conn.execute(
-            include_str!("../../queries/scan/create_album.sql"),
+            insert_sql,
             (
                 album.as_str(),
                 metadata.sort_album.as_ref().unwrap_or(album).as_str(),
                 artist_id_val,
-                image_val,
-                thumb_val,
                 date_val,
                 label_val,
                 catalog_val,
@@ -534,7 +542,7 @@ impl ScanThread {
         .await
         .with_context(|| {
             format!(
-                "failed to insert album: title={:?} artist_id={:?} mbid={:?}",
+                "failed to insert album basic fields: title={:?} artist_id={:?} mbid={:?}",
                 album, artist_id, mbid
             )
         })?;
@@ -544,6 +552,32 @@ impl ScanThread {
             .query_scalar::<i64>("SELECT last_insert_rowid()", ())
             .await
             .context("failed to get last inserted album id")?;
+
+        // Step 2: Update BLOB fields separately if present
+        if resized_image.is_some() || thumb.is_some() {
+            let update_sql = "UPDATE album SET
+                image = CASE WHEN length(?) = 0 THEN NULL ELSE ? END,
+                thumb = CASE WHEN length(?) = 0 THEN NULL ELSE ? END
+                WHERE id = ?";
+
+            let image_val = resized_image.unwrap_or_else(Vec::new);
+            let thumb_val = thumb.unwrap_or_else(Vec::new);
+
+            conn.execute(
+                update_sql,
+                (
+                    image_val.clone(),
+                    image_val,
+                    thumb_val.clone(),
+                    thumb_val,
+                    id,
+                ),
+            )
+            .await
+            .with_context(|| {
+                format!("failed to update album BLOB fields: id={:?}", id)
+            })?;
+        }
 
         Ok(Some(id))
     }
@@ -610,37 +644,72 @@ impl ScanThread {
         let genre = metadata.genre.as_deref().unwrap_or("");
         let artist = metadata.artist.as_deref().unwrap_or("");
 
-        // Use execute instead of query_one for INSERT
-        let sql = "INSERT INTO track (title, title_sortable, album_id, track_number, disc_number, duration, location, genres, artist_names, folder)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        // WORKAROUND for turso crate 0.2.2 bug:
+        // Cannot handle mixed String/i64 types in tuple - parameters get scrambled
+        // Solution: Insert minimum required fields with ONE i64 at the end, then UPDATE remaining fields
+
+        // Step 1: Insert required NOT NULL fields (3 String + 1 i64)
+        // Test if single i64 at end works - if not, will need to use literal value in SQL
+        let insert_sql = "INSERT INTO track (title, title_sortable, location, duration)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (location) DO UPDATE SET
                 title = EXCLUDED.title,
                 title_sortable = EXCLUDED.title_sortable,
-                album_id = EXCLUDED.album_id,
-                track_number = EXCLUDED.track_number,
-                disc_number = EXCLUDED.disc_number,
-                duration = EXCLUDED.duration,
-                location = EXCLUDED.location,
-                genres = EXCLUDED.genres,
-                artist_names = EXCLUDED.artist_names,
-                folder = EXCLUDED.folder";
+                duration = EXCLUDED.duration";
 
         conn.execute(
-            sql,
+            insert_sql,
             (
                 name.clone(),               // String - $1
                 name.clone(),               // String - $2
-                album_id_unwrapped,         // i64 - $3
-                track_num,                  // i64 - $4
-                disc_num,                   // i64 - $5
-                length as i64,              // i64 - $6
-                path_str.clone(),           // String - $7
-                genre.to_string(),          // String - $8
-                artist.to_string(),         // String - $9
-                parent_str.to_string(),     // String - $10
+                path_str.clone(),           // String - $3
+                length as i64,              // i64 - $4 (ONLY ONE i64, at the END)
             ),
         )
-        .await?;
+        .await
+        .with_context(|| {
+            format!("failed to insert track: location={:?}", path_str)
+        })?;
+
+        // Step 2: Update ONLY i64 fields (3 i64 parameters + String WHERE in SQL literal)
+        let update_int_sql = format!(
+            "UPDATE track SET album_id = ?, track_number = ?, disc_number = ? WHERE location = '{}'",
+            path_str.replace("'", "''")  // Escape single quotes
+        );
+
+        conn.execute(
+            &update_int_sql,
+            (
+                album_id_unwrapped,         // i64 - $1
+                track_num,                  // i64 - $2
+                disc_num,                   // i64 - $3
+            ),
+        )
+        .await
+        .with_context(|| {
+            format!("failed to update track integer fields")
+        })?;
+
+        // Step 3: Update String fields (folder + genres + artist_names, 4 String parameters)
+        let update_str_sql = "UPDATE track SET
+            folder = $1,
+            genres = $2,
+            artist_names = $3
+            WHERE location = $4";
+
+        conn.execute(
+            update_str_sql,
+            (
+                parent_str.to_string(),     // String - $1
+                genre.to_string(),          // String - $2
+                artist.to_string(),         // String - $3
+                path_str,                   // String - $4
+            ),
+        )
+        .await
+        .with_context(|| {
+            format!("failed to update track string fields")
+        })?;
 
         Ok(())
     }
