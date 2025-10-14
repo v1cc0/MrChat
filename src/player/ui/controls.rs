@@ -296,9 +296,9 @@ impl Render for PlaybackSection {
                                 cx.stop_propagation();
                                 window.prevent_default();
                             })
-                            .on_click(|_, window, cx| {
+                            .on_click(|_, _, cx| {
                                 cx.stop_propagation();
-                                window.dispatch_action(Box::new(Previous), cx);
+                                cx.global::<GPUIPlaybackInterface>().previous();
                             })
                             .child(icon(PREV_TRACK).size(px(16.0))),
                     )
@@ -320,9 +320,14 @@ impl Render for PlaybackSection {
                                 cx.stop_propagation();
                                 window.prevent_default();
                             })
-                            .on_click(|_, window, cx| {
+                            .on_click(|_, _, cx| {
                                 cx.stop_propagation();
-                                window.dispatch_action(Box::new(PlayPause), cx);
+                                let state = cx.global::<PlaybackInfo>().playback_state.read(cx);
+                                let interface = cx.global::<GPUIPlaybackInterface>();
+                                match *state {
+                                    PlaybackState::Playing => interface.pause(),
+                                    _ => interface.play(),
+                                }
                             })
                             .when(*state == PlaybackState::Playing, |div| {
                                 div.child(icon(PAUSE).size(px(16.0)))
@@ -347,9 +352,9 @@ impl Render for PlaybackSection {
                                 cx.stop_propagation();
                                 window.prevent_default();
                             })
-                            .on_click(|_, window, cx| {
+                            .on_click(|_, _, cx| {
                                 cx.stop_propagation();
-                                window.dispatch_action(Box::new(Next), cx);
+                                cx.global::<GPUIPlaybackInterface>().next();
                             })
                             .child(icon(NEXT_TRACK).size(px(16.0))),
                     ),

@@ -189,25 +189,28 @@
       - folder: 第 12 列（不在结构体中，忽略）
   - **结果**：✅ 播放功能完全正常，所有歌曲路径正确加载
   - **教训**：使用 `SELECT *` 时必须严格匹配表的实际列顺序，建议在数据库 schema 变更后及时更新所有 from_row 实现
-- **修复暂停/停止按钮事件穿透问题**：
-  - **问题**：用户报告播放功能正常，但点击暂停/停止按钮不起作用，反而导致右侧边栏移动
+- **修复播放控制按钮键盘快捷键冲突**：
+  - **问题**：点击暂停按钮时，空格键事件被发送到聊天输入框，导致输入空格而不是暂停播放
   - **根本原因**：
-    - PlaybackSection 使用绝对定位 (`.absolute()`) 居中显示播放控制按钮
-    - 虽然按钮有 `on_mouse_down` 中的 `cx.stop_propagation()`，但 `on_click` 处理器中没有阻止事件传播
-    - 点击事件穿透到下层元素，被队列按钮（右侧菜单按钮）捕获，导致侧边栏打开/关闭
+    - 播放控制按钮使用 `window.dispatch_action(Box::new(PlayPause), cx)` 触发 action
+    - 空格键绑定到 PlayPause action（global_actions.rs:40）
+    - dispatch_action 会触发键绑定系统，导致空格键事件传播到当前焦点元素（聊天输入框）
+    - 其他按钮（shuffle, repeat）直接调用 `GPUIPlaybackInterface` 方法，没有这个问题
   - **解决方案**（src/player/ui/controls.rs）：
-    - 在所有播放控制按钮的 `on_click` 处理器中添加 `cx.stop_propagation()`：
-      - Previous 按钮（299行）
-      - Play/Pause 按钮（322行）
-      - Next 按钮（350行）
-      - Shuffle 按钮（270行）
-      - Repeat 按钮（381行）
+    - 改为直接调用 `GPUIPlaybackInterface` 的方法，绕过 action 系统：
+      - Previous 按钮：调用 `interface.previous()`（301行）
+      - Play/Pause 按钮：根据状态调用 `interface.pause()` 或 `interface.play()`（323-330行）
+      - Next 按钮：调用 `interface.next()`（357行）
+    - 这样做的好处：
+      - 不触发键绑定系统，避免键盘事件传播
+      - 与 shuffle/repeat 按钮的实现方式一致
+      - 更直接、更高效
   - **调试日志**（保留用于将来调试）：
     - global_actions.rs:75-93：记录 PlayPause action 触发和状态判断
     - thread.rs:293：记录所有接收到的命令
     - thread.rs:318-325：记录 pause() 调用和状态变化
     - thread.rs:877-883：记录 stop() 调用
-  - **结果**：✅ 修复编译成功，现在点击事件不会穿透到其他元素
+  - **结果**：✅ 播放控制按钮现在正常工作，不会向聊天输入框发送空格键
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
