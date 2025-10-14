@@ -4,12 +4,43 @@ pub mod table;
 use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use gpui::{IntoElement, RenderImage, SharedString};
 use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
 
 use crate::util::rgb_to_bgr;
+
+fn parse_timestamp(raw: &str) -> Result<DateTime<Utc>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("timestamp is empty");
+    }
+
+    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    if let Ok(dt) = DateTime::parse_from_rfc2822(trimmed) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    const TZ_FORMATS: [&str; 2] = ["%Y-%m-%d %H:%M:%S%.f%z", "%Y-%m-%d %H:%M:%S%z"];
+    for fmt in TZ_FORMATS {
+        if let Ok(dt) = DateTime::parse_from_str(trimmed, fmt) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+    }
+
+    const NAIVE_FORMATS: [&str; 2] = ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"];
+    for fmt in NAIVE_FORMATS {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(trimmed, fmt) {
+            return Ok(Utc.from_utc_datetime(&naive));
+        }
+    }
+
+    anyhow::bail!("unsupported timestamp format: {trimmed}");
+}
 
 pub struct Artist {
     pub id: i64,
@@ -26,14 +57,27 @@ impl Artist {
     pub fn from_row(row: &turso::Row) -> Result<Self> {
         Ok(Self {
             id: row.get(0).context("failed to get id")?,
-            name: row.get::<Option<String>>(1).context("failed to get name")?.map(DBString::from),
+            name: row
+                .get::<Option<String>>(1)
+                .context("failed to get name")?
+                .map(DBString::from),
             name_sortable: row.get(2).context("failed to get name_sortable")?,
-            bio: row.get::<Option<String>>(3).context("failed to get bio")?.map(DBString::from),
-            created_at: row.get::<String>(4).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
-            image: row.get::<Option<Vec<u8>>>(5).context("failed to get image")?
+            bio: row
+                .get::<Option<String>>(3)
+                .context("failed to get bio")?
+                .map(DBString::from),
+            created_at: {
+                let raw = row.get::<String>(4).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
+            image: row
+                .get::<Option<Vec<u8>>>(5)
+                .context("failed to get image")?
                 .map(|v| v.into_boxed_slice()),
-            image_mime: row.get::<Option<String>>(6).context("failed to get image_mime")?.map(DBString::from),
+            image_mime: row
+                .get::<Option<String>>(6)
+                .context("failed to get image_mime")?
+                .map(DBString::from),
             tags: None,
         })
     }
@@ -167,20 +211,41 @@ impl Album {
         Ok(Self {
             id: row.get(0).context("failed to get id")?,
             title: DBString::from(row.get::<String>(1).context("failed to get title")?),
-            title_sortable: DBString::from(row.get::<String>(2).context("failed to get title_sortable")?),
+            title_sortable: DBString::from(
+                row.get::<String>(2)
+                    .context("failed to get title_sortable")?,
+            ),
             artist_id: row.get(3).context("failed to get artist_id")?,
-            release_date: row.get::<Option<String>>(4).context("failed to get release_date")?
+            release_date: row
+                .get::<Option<String>>(4)
+                .context("failed to get release_date")?
                 .and_then(|s| s.parse().ok()),
-            created_at: row.get::<String>(5).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
-            image: row.get::<Option<Vec<u8>>>(6).context("failed to get image")?
+            created_at: {
+                let raw = row.get::<String>(5).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
+            image: row
+                .get::<Option<Vec<u8>>>(6)
+                .context("failed to get image")?
                 .map(|v| v.into_boxed_slice()),
-            thumb: row.get::<Option<Vec<u8>>>(7).context("failed to get thumb")?.map(Thumbnail::from),
+            thumb: row
+                .get::<Option<Vec<u8>>>(7)
+                .context("failed to get thumb")?
+                .map(Thumbnail::from),
             image_mime: row.get(8).context("failed to get image_mime")?,
             tags: None,
-            label: row.get::<Option<String>>(9).context("failed to get label")?.map(DBString::from),
-            catalog_number: row.get::<Option<String>>(10).context("failed to get catalog_number")?.map(DBString::from),
-            isrc: row.get::<Option<String>>(11).context("failed to get isrc")?.map(DBString::from),
+            label: row
+                .get::<Option<String>>(9)
+                .context("failed to get label")?
+                .map(DBString::from),
+            catalog_number: row
+                .get::<Option<String>>(10)
+                .context("failed to get catalog_number")?
+                .map(DBString::from),
+            isrc: row
+                .get::<Option<String>>(11)
+                .context("failed to get isrc")?
+                .map(DBString::from),
         })
     }
 }
@@ -206,17 +271,25 @@ impl Track {
         Ok(Self {
             id: row.get(0).context("failed to get id")?,
             title: DBString::from(row.get::<String>(1).context("failed to get title")?),
-            title_sortable: DBString::from(row.get::<String>(2).context("failed to get title_sortable")?),
+            title_sortable: DBString::from(
+                row.get::<String>(2)
+                    .context("failed to get title_sortable")?,
+            ),
             album_id: row.get(3).context("failed to get album_id")?,
             track_number: row.get(4).context("failed to get track_number")?,
             disc_number: row.get(5).context("failed to get disc_number")?,
             duration: row.get(6).context("failed to get duration")?,
-            created_at: row.get::<String>(7).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
+            created_at: {
+                let raw = row.get::<String>(7).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
             genres: None,
             tags: None,
             location: PathBuf::from(row.get::<String>(8).context("failed to get location")?),
-            artist_names: row.get::<Option<String>>(9).context("failed to get artist_names")?.map(DBString::from),
+            artist_names: row
+                .get::<Option<String>>(9)
+                .context("failed to get artist_names")?
+                .map(DBString::from),
         })
     }
 }
@@ -251,8 +324,10 @@ impl Playlist {
         Ok(Self {
             id: row.get(0).context("failed to get id")?,
             name: DBString::from(row.get::<String>(1).context("failed to get name")?),
-            created_at: row.get::<String>(2).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
+            created_at: {
+                let raw = row.get::<String>(2).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
             playlist_type: PlaylistType::from_i32(row.get(3).context("failed to get type")?)?,
         })
     }
@@ -272,8 +347,10 @@ impl PlaylistWithCount {
         Ok(Self {
             id: row.get(0).context("failed to get id")?,
             name: DBString::from(row.get::<String>(1).context("failed to get name")?),
-            created_at: row.get::<String>(2).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
+            created_at: {
+                let raw = row.get::<String>(2).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
             playlist_type: PlaylistType::from_i32(row.get(3).context("failed to get type")?)?,
             track_count: row.get(4).context("failed to get track_count")?,
         })
@@ -295,8 +372,10 @@ impl PlaylistItem {
             id: row.get(0).context("failed to get id")?,
             playlist_id: row.get(1).context("failed to get playlist_id")?,
             track_id: row.get(2).context("failed to get track_id")?,
-            created_at: row.get::<String>(3).context("failed to get created_at")?
-                .parse().context("failed to parse created_at")?,
+            created_at: {
+                let raw = row.get::<String>(3).context("failed to get created_at")?;
+                parse_timestamp(&raw).context("failed to parse created_at")?
+            },
             position: row.get(4).context("failed to get position")?,
         })
     }
@@ -312,7 +391,10 @@ impl TrackStats {
     pub fn from_row(row: &turso::Row) -> Result<Self> {
         Ok(Self {
             track_count: row.get(0).context("failed to get track_count")?,
-            total_duration: row.get(1).context("failed to get total_duration")?,
+            total_duration: row
+                .get::<Option<i64>>(1)
+                .context("failed to get total_duration")?
+                .unwrap_or(0),
         })
     }
 }

@@ -5,6 +5,8 @@
 - （永久保留）调试或检查本地 Turso 数据库时统一使用 `tursodb` CLI。
 
 ## 已完成
+- 修复播放列表加载失败：新增通用 `parse_timestamp` 解析函数覆盖 SQLite/Turso 默认时间格式，批量替换 `created_at` 字段解析，并修正播放列表聚合查询列顺序与分组。
+- 规避空库统计崩溃：`track_stats` 查询使用 `COALESCE`，`TrackStats::from_row` 对 `total_duration` 为空时回落为 0。
 - 读取并梳理 `src/ui`、`src/settings`、`src/services`、`src/media` 等核心模块的职责。
 - 识别出 `gpui` 驱动的组件体系（按钮、输入框、模态框、主题）可作为聊天界面的基础。
 - 初步整理 Playback/Library 扫描线程等与音频播放高度耦合的部分，后续将作为迁移/替换重点。
@@ -43,9 +45,9 @@
 - 设计音乐模块与聊天界面的模块化隔离（启动/挂起/控制接口），确保互不干扰。
 - ~~评估并改造音乐库扫描/查询/缓存逻辑以适配 Turso API~~（已完成）
 - ~~实现 Turso 连接配置加载 + 健康检查命令，补齐 CRUD 基础~~（已完成）
+- 排查 SearchModel 在窗口退出时的弱引用崩溃，补充生命周期守卫。
 - 为聊天服务层提供最小 API（会话创建、消息写入）并准备集成测试框架。
 - 设计聊天 UI 原型并扩展 `ChatOverview`（新建会话、消息输入/流式呈现、错误提示）。
 - 拆分聊天服务错误处理/日志策略，补充落地的 tracing 输出格式。
 - 测试数据库迁移的功能完整性（library 扫描、封面加载等）。
 - 为音乐库删除路径补充集成测试/回归案例，验证手动级联清理行为（album/artist/album_path）。
-- 排查 playlist 初始化数据解析失败（`created_at` 字段格式），补充兼容逻辑。

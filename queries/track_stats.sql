@@ -1,1 +1,1 @@
-SELECT COUNT(*) as track_count, SUM(duration) as total_duration FROM track;
+SELECT COUNT(*) AS track_count, COALESCE(SUM(duration), 0) AS total_duration FROM track;

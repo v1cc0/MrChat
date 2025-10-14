@@ -72,18 +72,12 @@ pub async fn list_albums(
 
     let conn = db.connect()?;
     conn.query_map(query, (), |row| {
-        Ok((
-            row.get::<i64>(0)? as u32,
-            row.get::<String>(1)?,
-        ))
+        Ok((row.get::<i64>(0)? as u32, row.get::<String>(1)?))
     })
     .await
 }
 
-pub async fn list_tracks_in_album(
-    db: &TursoDatabase,
-    album_id: i64,
-) -> Result<Arc<Vec<Track>>> {
+pub async fn list_tracks_in_album(db: &TursoDatabase, album_id: i64) -> Result<Arc<Vec<Track>>> {
     let query = include_str!("../../queries/library/find_tracks_in_album.sql");
 
     let conn = db.connect()?;
@@ -114,10 +108,7 @@ pub async fn get_album_by_id(
     Ok(Arc::new(album))
 }
 
-pub async fn get_artist_name_by_id(
-    db: &TursoDatabase,
-    artist_id: i64,
-) -> Result<Arc<String>> {
+pub async fn get_artist_name_by_id(db: &TursoDatabase, artist_id: i64) -> Result<Arc<String>> {
     let query = include_str!("../../queries/library/find_artist_name_by_id.sql");
 
     let conn = db.connect()?;
@@ -126,10 +117,7 @@ pub async fn get_artist_name_by_id(
     Ok(Arc::new(name))
 }
 
-pub async fn get_artist_by_id(
-    db: &TursoDatabase,
-    artist_id: i64,
-) -> Result<Arc<Artist>> {
+pub async fn get_artist_by_id(db: &TursoDatabase, artist_id: i64) -> Result<Arc<Artist>> {
     let query = include_str!("../../queries/library/find_artist_by_id.sql");
 
     let conn = db.connect()?;
@@ -149,9 +137,7 @@ pub async fn get_track_by_id(db: &TursoDatabase, track_id: i64) -> Result<Arc<Tr
 
 /// Lists all albums for searching. Returns a vector of tuples containing the id, name, and artist
 /// name.
-pub async fn list_albums_search(
-    db: &TursoDatabase,
-) -> Result<Vec<(u32, String, String)>> {
+pub async fn list_albums_search(db: &TursoDatabase) -> Result<Vec<(u32, String, String)>> {
     let query = include_str!("../../queries/library/find_albums_search.sql");
 
     let conn = db.connect()?;
@@ -165,15 +151,12 @@ pub async fn list_albums_search(
     .await
 }
 
-pub async fn add_playlist_item(
-    db: &TursoDatabase,
-    playlist_id: i64,
-    track_id: i64,
-) -> Result<i64> {
+pub async fn add_playlist_item(db: &TursoDatabase, playlist_id: i64, track_id: i64) -> Result<i64> {
     let query = include_str!("../../queries/playlist/add_track.sql");
 
     let conn = db.connect()?;
-    conn.execute_returning_id(query, [playlist_id, track_id]).await
+    conn.execute_returning_id(query, [playlist_id, track_id])
+        .await
 }
 
 pub async fn create_playlist(db: &TursoDatabase, name: &str) -> Result<i64> {
@@ -192,25 +175,24 @@ pub async fn delete_playlist(db: &TursoDatabase, playlist_id: i64) -> Result<()>
     Ok(())
 }
 
-pub async fn get_all_playlists(
-    db: &TursoDatabase,
-) -> Result<Arc<Vec<PlaylistWithCount>>> {
+pub async fn get_all_playlists(db: &TursoDatabase) -> Result<Arc<Vec<PlaylistWithCount>>> {
     let query = include_str!("../../queries/playlist/get_all_playlists.sql");
 
     let conn = db.connect()?;
-    let playlists = conn.query_map(query, (), PlaylistWithCount::from_row).await?;
+    let playlists = conn
+        .query_map(query, (), PlaylistWithCount::from_row)
+        .await?;
 
     Ok(Arc::new(playlists))
 }
 
-pub async fn get_playlist(
-    db: &TursoDatabase,
-    playlist_id: i64,
-) -> Result<Arc<Playlist>> {
+pub async fn get_playlist(db: &TursoDatabase, playlist_id: i64) -> Result<Arc<Playlist>> {
     let query = include_str!("../../queries/playlist/get_playlist.sql");
 
     let conn = db.connect()?;
-    let playlist = conn.query_one(query, [playlist_id], Playlist::from_row).await?;
+    let playlist = conn
+        .query_one(query, [playlist_id], Playlist::from_row)
+        .await?;
 
     Ok(Arc::new(playlist))
 }
@@ -222,9 +204,9 @@ pub async fn get_playlist_track_files(
     let query = include_str!("../../queries/playlist/get_track_files.sql");
 
     let conn = db.connect()?;
-    let track_files = conn.query_map(query, [playlist_id], |row| {
-        Ok(row.get::<String>(0)?)
-    }).await?;
+    let track_files = conn
+        .query_map(query, [playlist_id], |row| Ok(row.get::<String>(0)?))
+        .await?;
 
     Ok(Arc::new(track_files))
 }
@@ -237,22 +219,16 @@ pub async fn get_playlist_tracks(
     let query = include_str!("../../queries/playlist/get_track_listing.sql");
 
     let conn = db.connect()?;
-    let tracks = conn.query_map(query, [playlist_id], |row| {
-        Ok((
-            row.get::<i64>(0)?,
-            row.get::<i64>(1)?,
-            row.get::<i64>(2)?,
-        ))
-    }).await?;
+    let tracks = conn
+        .query_map(query, [playlist_id], |row| {
+            Ok((row.get::<i64>(0)?, row.get::<i64>(1)?, row.get::<i64>(2)?))
+        })
+        .await?;
 
     Ok(Arc::new(tracks))
 }
 
-pub async fn move_playlist_item(
-    db: &TursoDatabase,
-    item_id: i64,
-    new_position: i64,
-) -> Result<()> {
+pub async fn move_playlist_item(db: &TursoDatabase, item_id: i64, new_position: i64) -> Result<()> {
     // retrieve the current item's position
     let original_item = get_playlist_item(db, item_id).await?;
 
@@ -260,12 +236,14 @@ pub async fn move_playlist_item(
         let move_query = include_str!("../../queries/playlist/move_track_down.sql");
 
         let conn = db.connect()?;
-        conn.execute(move_query, [new_position, original_item.position, item_id]).await?;
+        conn.execute(move_query, [new_position, original_item.position, item_id])
+            .await?;
     } else if original_item.position < new_position {
         let move_query = include_str!("../../queries/playlist/move_track_up.sql");
 
         let conn = db.connect()?;
-        conn.execute(move_query, [new_position, original_item.position, item_id]).await?;
+        conn.execute(move_query, [new_position, original_item.position, item_id])
+            .await?;
     }
 
     Ok(())
@@ -281,14 +259,12 @@ pub async fn remove_playlist_item(db: &TursoDatabase, item_id: i64) -> Result<()
     Ok(())
 }
 
-pub async fn get_playlist_item(
-    db: &TursoDatabase,
-    item_id: i64,
-) -> Result<PlaylistItem> {
+pub async fn get_playlist_item(db: &TursoDatabase, item_id: i64) -> Result<PlaylistItem> {
     let query = include_str!("../../queries/playlist/select_playlist_item.sql");
 
     let conn = db.connect()?;
-    conn.query_one(query, [item_id], PlaylistItem::from_row).await
+    conn.query_one(query, [item_id], PlaylistItem::from_row)
+        .await
 }
 
 pub async fn get_track_stats(db: &TursoDatabase) -> Result<Arc<TrackStats>> {
@@ -308,17 +284,14 @@ pub async fn playlist_has_track(
     let query = include_str!("../../queries/playlist/playlist_has_track.sql");
 
     let conn = db.connect()?;
-    conn.query_scalar_optional(query, [playlist_id, track_id]).await
+    conn.query_scalar_optional(query, [playlist_id, track_id])
+        .await
 }
 
 pub trait LibraryAccess {
     fn list_albums(&self, sort_method: AlbumSortMethod) -> Result<Vec<(u32, String)>>;
     fn list_tracks_in_album(&self, album_id: i64) -> Result<Arc<Vec<Track>>>;
-    fn get_album_by_id(
-        &self,
-        album_id: i64,
-        method: AlbumMethod,
-    ) -> Result<Arc<Album>>;
+    fn get_album_by_id(&self, album_id: i64, method: AlbumMethod) -> Result<Arc<Album>>;
     fn get_artist_name_by_id(&self, artist_id: i64) -> Result<Arc<String>>;
     fn get_artist_by_id(&self, artist_id: i64) -> Result<Arc<Artist>>;
     fn get_track_by_id(&self, track_id: i64) -> Result<Arc<Track>>;
@@ -329,19 +302,12 @@ pub trait LibraryAccess {
     fn get_all_playlists(&self) -> Result<Arc<Vec<PlaylistWithCount>>>;
     fn get_playlist(&self, playlist_id: i64) -> Result<Arc<Playlist>>;
     fn get_playlist_track_files(&self, playlist_id: i64) -> Result<Arc<Vec<String>>>;
-    fn get_playlist_tracks(
-        &self,
-        playlist_id: i64,
-    ) -> Result<Arc<Vec<(i64, i64, i64)>>>;
+    fn get_playlist_tracks(&self, playlist_id: i64) -> Result<Arc<Vec<(i64, i64, i64)>>>;
     fn move_playlist_item(&self, item_id: i64, new_position: i64) -> Result<()>;
     fn remove_playlist_item(&self, item_id: i64) -> Result<()>;
     fn get_playlist_item(&self, item_id: i64) -> Result<PlaylistItem>;
     fn get_track_stats(&self) -> Result<Arc<TrackStats>>;
-    fn playlist_has_track(
-        &self,
-        playlist_id: i64,
-        track_id: i64,
-    ) -> Result<Option<i64>>;
+    fn playlist_has_track(&self, playlist_id: i64, track_id: i64) -> Result<Option<i64>>;
 }
 
 impl LibraryAccess for App {
@@ -355,11 +321,7 @@ impl LibraryAccess for App {
         block_on(list_tracks_in_album(&pool.0, album_id))
     }
 
-    fn get_album_by_id(
-        &self,
-        album_id: i64,
-        method: AlbumMethod,
-    ) -> Result<Arc<Album>> {
+    fn get_album_by_id(&self, album_id: i64, method: AlbumMethod) -> Result<Arc<Album>> {
         let pool: &Pool = self.global();
         block_on(get_album_by_id(&pool.0, album_id, method))
     }
@@ -416,10 +378,7 @@ impl LibraryAccess for App {
         block_on(get_playlist_track_files(&pool.0, playlist_id))
     }
 
-    fn get_playlist_tracks(
-        &self,
-        playlist_id: i64,
-    ) -> Result<Arc<Vec<(i64, i64, i64)>>> {
+    fn get_playlist_tracks(&self, playlist_id: i64) -> Result<Arc<Vec<(i64, i64, i64)>>> {
         let pool: &Pool = self.global();
         block_on(get_playlist_tracks(&pool.0, playlist_id))
     }
@@ -444,11 +403,7 @@ impl LibraryAccess for App {
         block_on(get_track_stats(&pool.0))
     }
 
-    fn playlist_has_track(
-        &self,
-        playlist_id: i64,
-        track_id: i64,
-    ) -> Result<Option<i64>> {
+    fn playlist_has_track(&self, playlist_id: i64, track_id: i64) -> Result<Option<i64>> {
         let pool: &Pool = self.global();
         block_on(playlist_has_track(&pool.0, playlist_id, track_id))
     }

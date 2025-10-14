@@ -23,15 +23,17 @@ pub fn load(pool: &TursoDatabase, url: Url) -> gpui::Result<Option<Cow<'static, 
                     conn.query_one(
                         include_str!("../../../queries/assets/find_album_thumb.sql"),
                         (id,),
-                        |row| Ok(row.get::<Vec<u8>>(0)?)
-                    ).await
+                        |row| Ok(row.get::<Vec<u8>>(0)?),
+                    )
+                    .await
                 })?,
                 "full" => block_on(async {
                     conn.query_one(
                         include_str!("../../../queries/assets/find_album_art.sql"),
                         (id,),
-                        |row| Ok(row.get::<Vec<u8>>(0)?)
-                    ).await
+                        |row| Ok(row.get::<Vec<u8>>(0)?),
+                    )
+                    .await
                 })?,
                 _ => unimplemented!(),
             };

@@ -13,9 +13,7 @@ use tracing::{debug, warn};
 use crate::{
     config::{AppConfig, AppConfigGlobal},
     db::TursoDatabase,
-    library::{
-        scan::{ScanInterface, ScanThread},
-    },
+    library::scan::{ScanInterface, ScanThread},
     modules::chat::{self, services::ChatServices, ui::layout::ChatOverview},
     playback::{interface::GPUIPlaybackInterface, queue::QueueItemData, thread::PlaybackThread},
     services::controllers::make_cl,
@@ -345,13 +343,19 @@ pub async fn run() {
     let music_db_path = directory.join("music.db");
     let music_db = match TursoDatabase::open_local(&music_db_path).await {
         Ok(db) => db,
-        Err(err) => panic!("fatal: unable to open music database {:?}: {:?}", music_db_path, err),
+        Err(err) => panic!(
+            "fatal: unable to open music database {:?}: {:?}",
+            music_db_path, err
+        ),
     };
 
     let chat_db_path = directory.join("mrchat.db");
     let chat_db = match TursoDatabase::open_local(&chat_db_path).await {
         Ok(db) => db,
-        Err(err) => panic!("fatal: unable to open chat database {:?}: {:?}", chat_db_path, err),
+        Err(err) => panic!(
+            "fatal: unable to open chat database {:?}: {:?}",
+            chat_db_path, err
+        ),
     };
 
     // Run migrations for library schema
