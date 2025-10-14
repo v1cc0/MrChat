@@ -24,7 +24,20 @@ impl TursoDatabase {
             .connect()
             .context("failed to connect to turso database for pragma setup")?;
         let conn = TursoConnection { inner: conn };
-        block_on(apply_pragmas(&conn))?;
+
+        // Set WAL mode at database level (must succeed)
+        block_on(run_with_retry(|| async {
+            conn.query_scalar::<String>("PRAGMA journal_mode = WAL", ())
+                .await
+                .map(|_| ())
+        }))
+        .context("Failed to enable WAL mode - this is required for concurrent access")?;
+
+        // Set busy timeout for this connection
+        conn.inner
+            .busy_timeout(Duration::from_millis(10000))
+            .map_err(|err| Error::msg(err.to_string()))
+            .context("Failed to set busy timeout")?;
 
         Ok(Self { inner: db })
     }
@@ -34,9 +47,13 @@ impl TursoDatabase {
             .inner
             .connect()
             .context("failed to connect to turso database")?;
-        let conn = TursoConnection { inner: conn };
-        block_on(apply_pragmas(&conn))?;
-        Ok(conn)
+
+        // Set busy timeout for each new connection (WAL is already set at database level)
+        conn.busy_timeout(Duration::from_millis(10000))
+            .map_err(|err| Error::msg(err.to_string()))
+            .context("Failed to set busy timeout on connection")?;
+
+        Ok(TursoConnection { inner: conn })
     }
 
     pub async fn run_migrations(&self, migrations_dir: impl AsRef<Path>) -> Result<()> {
@@ -240,30 +257,7 @@ impl TursoConnection {
     }
 }
 
-async fn apply_pragmas(conn: &TursoConnection) -> Result<()> {
-    if let Err(err) = run_with_retry(|| async {
-        conn.query_scalar::<String>("PRAGMA journal_mode = WAL", ())
-            .await
-            .map(|_| ())
-    })
-    .await
-    {
-        warn!("Failed to enable WAL mode on connection: {:?}", err);
-    }
-
-    if let Err(err) = conn
-        .inner
-        .busy_timeout(Duration::from_millis(5000))
-        .map_err(|err| Error::msg(err.to_string()))
-    {
-        warn!(
-            "Failed to set busy timeout on connection (continuing without it): {:?}",
-            err
-        );
-    }
-
-    Ok(())
-}
+// Removed apply_pragmas - now handled directly in open_local and connect
 
 async fn run_with_retry<T, F, Fut>(mut op: F) -> Result<T>
 where

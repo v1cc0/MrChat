@@ -389,14 +389,12 @@ impl ScanThread {
         self.visited.push(path.clone());
     }
 
-    async fn insert_artist(&self, metadata: &Metadata) -> anyhow::Result<Option<i64>> {
+    async fn insert_artist(&self, conn: &TursoConnection, metadata: &Metadata) -> anyhow::Result<Option<i64>> {
         let artist = metadata.album_artist.clone().or(metadata.artist.clone());
 
         let Some(artist) = artist else {
             return Ok(None);
         };
-
-        let conn = self.pool.connect()?;
 
         // Try to insert, returns id if successful, None if conflict
         let result = conn
@@ -428,6 +426,7 @@ impl ScanThread {
 
     async fn insert_album(
         &self,
+        conn: &TursoConnection,
         metadata: &Metadata,
         artist_id: Option<i64>,
         image: &Option<Box<[u8]>>,
@@ -440,8 +439,6 @@ impl ScanThread {
             .mbid_album
             .clone()
             .unwrap_or_else(|| "none".to_string());
-
-        let conn = self.pool.connect()?;
 
         // Check if album already exists
         let existing = conn
@@ -539,6 +536,7 @@ impl ScanThread {
 
     async fn insert_track(
         &self,
+        conn: &TursoConnection,
         metadata: &Metadata,
         album_id: Option<i64>,
         path: &Path,
@@ -550,8 +548,6 @@ impl ScanThread {
 
         let disc_num = metadata.disc_current.map(|v| v as i64).unwrap_or(-1);
         let parent = path.parent().unwrap();
-
-        let conn = self.pool.connect()?;
 
         let existing_path = conn
             .query_optional(
@@ -619,9 +615,12 @@ impl ScanThread {
             meta.artist, meta.name
         );
 
-        let artist_id = self.insert_artist(meta).await?;
-        let album_id = self.insert_album(meta, artist_id, image).await?;
-        self.insert_track(meta, album_id, path, *length).await?;
+        // Use a single connection for the entire metadata update
+        let conn = self.pool.connect()?;
+
+        let artist_id = self.insert_artist(&conn, meta).await?;
+        let album_id = self.insert_album(&conn, meta, artist_id, image).await?;
+        self.insert_track(&conn, meta, album_id, path, *length).await?;
 
         Ok(())
     }
