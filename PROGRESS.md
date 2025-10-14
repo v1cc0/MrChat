@@ -2,6 +2,7 @@
 
 ## 当前重点
 - 基于现有 Hummingbird 代码梳理的成果，制定聊天界面重构路径、Turso 一体化持久层方案，以及音乐播放模块的并存策略。
+- （永久保留）调试或检查本地 Turso 数据库时统一使用 `tursodb` CLI。
 
 ## 已完成
 - 读取并梳理 `src/ui`、`src/settings`、`src/services`、`src/media` 等核心模块的职责。
