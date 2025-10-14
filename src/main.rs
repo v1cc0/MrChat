@@ -21,7 +21,10 @@ mod util;
 
 main! {
     async fn main() {
-        tracing_subscriber::fmt::init();
+        // Configure tracing with local time instead of UTC
+        tracing_subscriber::fmt()
+            .with_timer(tracing_subscriber::fmt::time::LocalTime::rfc_3339())
+            .init();
 
         tracing::info!("Starting application");
 
