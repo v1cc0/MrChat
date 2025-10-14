@@ -582,6 +582,14 @@ impl ScanThread {
             })
             .ok_or_else(|| anyhow::anyhow!("failed to retrieve filename"))?;
 
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("path contains invalid UTF-8: {:?}", path))?;
+
+        let parent_str = parent
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("parent path contains invalid UTF-8: {:?}", parent))?;
+
         conn.query_one(
             include_str!("../../queries/scan/create_track.sql"),
             (
@@ -591,10 +599,10 @@ impl ScanThread {
                 metadata.track_current.map(|x| x as i32),
                 metadata.disc_current.map(|x| x as i32),
                 length as i32,
-                path.to_str(),
+                path_str,
                 metadata.genre.as_deref(),
                 metadata.artist.as_deref(),
-                parent.to_str(),
+                parent_str,
             ),
             |row| Ok(row.get::<i64>(0)?),
         )
