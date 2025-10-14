@@ -199,11 +199,11 @@ pub struct Album {
     pub created_at: DateTime<Utc>,
     pub image: Option<Box<[u8]>>,
     pub thumb: Option<Thumbnail>,
-    pub image_mime: Option<String>,
     pub tags: Option<Vec<String>>,
     pub label: Option<DBString>,
     pub catalog_number: Option<DBString>,
     pub isrc: Option<DBString>,
+    pub mbid: Option<DBString>,
 }
 
 impl Album {
@@ -233,8 +233,7 @@ impl Album {
                 .get::<Option<Vec<u8>>>(7)
                 .context("failed to get thumb")?
                 .map(Thumbnail::from),
-            image_mime: row.get(8).context("failed to get image_mime")?,
-            tags: None,
+            tags: None,  // Column 8 in DB but not parsed yet
             label: row
                 .get::<Option<String>>(9)
                 .context("failed to get label")?
@@ -246,6 +245,10 @@ impl Album {
             isrc: row
                 .get::<Option<String>>(11)
                 .context("failed to get isrc")?
+                .map(DBString::from),
+            mbid: row
+                .get::<Option<String>>(12)
+                .context("failed to get mbid")?
                 .map(DBString::from),
         })
     }

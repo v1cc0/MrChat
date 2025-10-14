@@ -77,6 +77,13 @@
   - 完整审查所有 `from_row` 实现（Artist, Album, Track, Playlist, PlaylistItem, TrackStats），确认类型安全
   - 审查所有 SQL 查询文件参数顺序，验证与表结构的匹配性
   - 测试迁移文件：在干净数据库上成功执行所有迁移，验证表结构和默认数据正确性
+- **修复 Album 结构体列顺序不匹配导致的 panic**：
+  - 问题：迁移清理后，新数据库使用时仍然 panic，原因是 `Album::from_row` 列读取顺序与数据库不匹配
+  - 根本原因：数据库中没有 `image_mime` 列（只有 Artist 表有），但 `Album` 结构体错误地包含了该字段；数据库中有 `mbid` 列，但结构体缺少该字段
+  - 修复方案（src/library/types.rs:192-254）：
+    - 从 `Album` 结构体删除 `image_mime` 字段，添加 `mbid` 字段
+    - 修复 `Album::from_row` 以正确读取列顺序：跳过位置 8 的 `tags`（暂不解析），读取位置 12 的 `mbid`
+  - 预防措施：使用 `SELECT *` 时必须严格匹配表的实际列顺序
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。
