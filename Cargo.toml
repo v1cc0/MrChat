@@ -1,6 +1,6 @@
 [package]
 name = "mrchat"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Ai Chat"
 license = "Apache-2.0"
