@@ -8,8 +8,11 @@
 - 修复播放列表加载失败：新增通用 `parse_timestamp` 解析函数覆盖 SQLite/Turso 默认时间格式，批量替换 `created_at` 字段解析，并修正播放列表聚合查询列顺序与分组。
 - 统一品牌标识：窗口标题、菜单、About/MPRIS/音频设备等用户可见文案更新为 “MrChat”，同时应用 ID 切换为 `org.v1cc0.mrchat`。
 - 统一数据目录：所有数据库、配置与缓存改为写入 `~/.local/share/mrchat/`，并在缺失配置时回退检查当前目录、提示用户并弹出配置向导窗口。
-- 修复音乐库扫描写入锁：为本地 Turso 启用 WAL + busy_timeout，并为元数据更新新增锁重试逻辑，避免 “database is locked” 导致的批量插入失败。
-- [**常驻提醒**] 参见 `docs/turso_busy_handler.md`：记录 Turso busy handler 与 SQLite 的行为差异，以及本项目如何配置 `busy_timeout`。调试数据库时必须遵守文档指导。
+- 修复音乐库扫描写入锁：为本地 Turso 启用 WAL + busy_timeout，并为元数据更新新增锁重试逻辑，避免 "database is locked" 导致的批量插入失败。
+- [**常驻提醒**] 参见 `docs/turso_database_issues.md`：记录 Turso 数据库在使用过程中的已知问题与解决方案，包括：
+  - **Busy Handler 行为差异**：Turso busy handler 与 SQLite 的差异，本项目如何配置 `busy_timeout`
+  - **Option 参数绑定 Panic**：turso crate 无法正确处理元组中的 Option<T> 参数，必须在 Rust 层转换为具体值
+  - 调试数据库问题时必须优先查阅此文档
 - 规避空库统计崩溃：`track_stats` 查询使用 `COALESCE`，`TrackStats::from_row` 对 `total_duration` 为空时回落为 0。
 - 读取并梳理 `src/ui`、`src/settings`、`src/services`、`src/media` 等核心模块的职责。
 - 识别出 `gpui` 驱动的组件体系（按钮、输入框、模态框、主题）可作为聊天界面的基础。
