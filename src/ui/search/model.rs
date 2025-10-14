@@ -64,15 +64,19 @@ impl SearchModel {
 
                     while tx.try_recv().is_ok() {
                         did_regenerate = true;
-                        weak.update(cx, |this: &mut SearchModel, cx| {
+                        // If entity is released, exit gracefully instead of panicking
+                        if weak.update(cx, |this: &mut SearchModel, cx| {
                             debug!("Received notification, regenerating list state");
                             this.regenerate_list_state(cx);
                             cx.notify();
-                        })
-                        .expect("unable to update weak search model");
+                        }).is_err() {
+                            debug!("SearchModel entity released, exiting search update loop");
+                            return;
+                        }
                     }
 
-                    weak.update(cx, |this: &mut SearchModel, cx| {
+                    // If entity is released, exit gracefully instead of panicking
+                    if weak.update(cx, |this: &mut SearchModel, cx| {
                         if !did_regenerate {
                             let matches = this.get_matches();
                             if matches != this.last_match {
@@ -82,8 +86,10 @@ impl SearchModel {
                             }
                         }
                         this.tick();
-                    })
-                    .expect("unable to update weak search model");
+                    }).is_err() {
+                        debug!("SearchModel entity released, exiting search update loop");
+                        return;
+                    }
 
                     cx.background_executor()
                         .timer(Duration::from_millis(10))
