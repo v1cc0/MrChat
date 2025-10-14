@@ -152,11 +152,11 @@ impl RootInterface for MprisControllerServer {
     }
 
     async fn desktop_entry(&self) -> fdo::Result<String> {
-        Ok("org.mailliw.hummingbird".to_string())
+        Ok("org.v1cc0.mrchat".to_string())
     }
 
     async fn identity(&self) -> fdo::Result<String> {
-        Ok("Hummingbird".to_string())
+        Ok("MrChat".to_string())
     }
 
     async fn supported_mime_types(&self) -> fdo::Result<Vec<String>> {
@@ -346,7 +346,7 @@ impl InitPlaybackController for MprisController {
             data: server_data,
         };
 
-        let server = smol::block_on(Server::new("org.mailliw.hummingbird", server))?;
+        let server = smol::block_on(Server::new("org.v1cc0.mrchat", server))?;
 
         Ok(Arc::new(Mutex::new(MprisController { data, server })))
     }

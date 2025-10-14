@@ -82,7 +82,7 @@ impl Render for Header {
                     .when(cfg!(not(target_os = "macos")), |this| {
                         this.child(
                             div()
-                                .id("hummingbird-name")
+                                .id("mrchat-name")
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, |_, window, cx| {
                                     window.prevent_default();
@@ -92,7 +92,7 @@ impl Render for Header {
                                     let show_about = cx.global::<Models>().show_about.clone();
                                     show_about.write(cx, true);
                                 })
-                                .child("Hummingbird")
+                                .child("MrChat")
                                 .mr(px(8.0)),
                         )
                     })

@@ -160,7 +160,7 @@ impl Render for InfoSection {
                                 .h_full()
                                 .items_center()
                                 .pb(px(6.0))
-                                .child("Hummingbird"),
+                                .child("MrChat"),
                         )
                     })
                     .when(*state != PlaybackState::Stopped, |e| {

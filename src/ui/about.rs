@@ -43,7 +43,7 @@ impl RenderOnce for AboutDialog {
                                             .text_size(px(36.0))
                                             .line_height(px(36.0))
                                             .ml(px(-2.0))
-                                            .child("Hummingbird"),
+                                            .child("MrChat"),
                                     )
                                     .child(
                                         div()

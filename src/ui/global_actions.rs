@@ -40,20 +40,20 @@ pub fn register_actions(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("space", PlayPause, None)]);
     cx.set_menus(vec![
         Menu {
-            name: SharedString::from("Hummingbird"),
+            name: SharedString::from("MrChat"),
             items: vec![
-                MenuItem::action("About Hummingbird", About),
+                MenuItem::action("About MrChat", About),
                 MenuItem::separator(),
                 MenuItem::submenu(Menu {
                     name: SharedString::from("Services"),
                     items: vec![],
                 }),
                 MenuItem::separator(),
-                MenuItem::action("Hide Hummingbird", HideSelf),
+                MenuItem::action("Hide MrChat", HideSelf),
                 MenuItem::action("Hide Others", HideOthers),
                 MenuItem::action("Show All", ShowAll),
                 MenuItem::separator(),
-                MenuItem::action("Quit Hummingbird", Quit),
+                MenuItem::action("Quit MrChat", Quit),
             ],
         },
         Menu {

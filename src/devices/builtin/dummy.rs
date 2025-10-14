@@ -127,7 +127,7 @@ impl Device for DummyDevice {
     }
 
     fn get_name(&self) -> Result<String, InfoError> {
-        Ok("Hummingbird Dummy Audio Device".to_string())
+        Ok("MrChat Dummy Audio Device".to_string())
     }
 
     fn get_uid(&self) -> Result<String, InfoError> {

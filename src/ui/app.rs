@@ -457,19 +457,19 @@ pub async fn run() {
                     window_decorations: Some(WindowDecorations::Client),
                     window_min_size: Some(size(px(800.0), px(600.0))),
                     titlebar: Some(TitlebarOptions {
-                        title: Some(SharedString::from("Hummingbird")),
+                        title: Some(SharedString::from("MrChat")),
                         appears_transparent: true,
                         traffic_light_position: Some(Point {
                             x: px(12.0),
                             y: px(11.0),
                         }),
                     }),
-                    app_id: Some("org.mailliw.hummingbird".to_string()),
+                    app_id: Some("org.v1cc0.mrchat".to_string()),
                     kind: WindowKind::Normal,
                     ..Default::default()
                 },
                 |window, cx| {
-                    window.set_window_title("Hummingbird");
+                    window.set_window_title("MrChat");
 
                     make_cl(cx, window);
 
