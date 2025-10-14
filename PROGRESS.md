@@ -138,15 +138,19 @@
     - 检查文件是否存在（`path.exists()`）
     - 对无效路径记录错误日志并自动跳到下一首歌曲（`self.next(false)`），避免中断播放
   - 结果：✅ 播放线程遇到无效路径时优雅降级，不再 panic
-- **修复数据库迁移未执行导致的 playlist 表缺失 panic**：
-  - 问题：启动时在 `src/player/ui/library/sidebar/playlists.rs:31` 出现 "no such table: playlist" 错误并 panic
-  - 根本原因：数据库迁移失败但程序继续运行（405行只使用 `warn!` 而不是 `expect!`），导致 playlist 等表未创建
-  - 表现：`music.db` 文件被创建但大小为 0 字节，因为从错误的工作目录运行时找不到 `./migrations` 目录
-  - 解决方案（src/player/ui/app.rs:405-426）：
-    - 改进迁移路径查找逻辑：优先检查当前目录的 `./migrations`，如果不存在则尝试可执行文件目录
-    - 如果找不到迁移目录，立即 panic 并显示清晰的错误信息
-    - 将迁移失败处理从 `warn!` 改为 `expect!`，确保迁移失败时程序立即停止而不是继续运行
-  - 结果：✅ 迁移失败时会显示清晰错误信息，避免启动不完整的数据库；用户从任何目录运行程序都能正确找到迁移文件
+- **将数据库迁移嵌入二进制文件实现自包含部署**：
+  - 问题：二进制文件运行时 panic "migrations directory not found"，因为程序依赖外部 `./migrations` 目录
+  - 用户需求：二进制文件应该是自包含的，不需要用户在特定目录下运行或携带额外文件
+  - 解决方案：
+    - 修改 `TursoDatabase::run_migrations` 接受 `&[(&str, &str)]` 参数而不是文件路径（src/shared/db/mod.rs:58-125）
+    - 在 `src/player/ui/app.rs:406-417` 使用 `include_str!` 宏将所有迁移 SQL 文件嵌入二进制
+    - 删除运行时文件系统读取逻辑，移除 `fs` 导入
+  - 好处：
+    - ✅ 二进制文件完全自包含，可以从任何目录运行
+    - ✅ 不需要分发 migrations 目录
+    - ✅ 首次运行时自动创建并初始化数据库
+    - ✅ 迁移历史仍然通过 `mrchat_migrations` 表正确跟踪
+  - 测试：从 `/tmp` 目录运行二进制文件成功创建数据库并应用所有 10 个迁移
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

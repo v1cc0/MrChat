@@ -402,26 +402,22 @@ pub async fn run() {
     };
 
     // Run migrations for library schema
-    // Try to find migrations directory relative to current directory first,
-    // then try relative to executable directory
-    let migrations_path = if Path::new("./migrations").exists() {
-        PathBuf::from("./migrations")
-    } else if let Ok(exe_path) = env::current_exe() {
-        let exe_dir = exe_path.parent().expect("exe has no parent directory");
-        exe_dir.join("migrations")
-    } else {
-        PathBuf::from("./migrations")
-    };
-
-    if !migrations_path.exists() {
-        panic!(
-            "fatal: migrations directory not found at {:?} - please run from project root or ensure migrations are installed",
-            migrations_path
-        );
-    }
+    // Migrations are embedded in the binary, so they work regardless of working directory
+    const MIGRATIONS: &[(&str, &str)] = &[
+        ("01_create_artist_table.sql", include_str!("../../../migrations/01_create_artist_table.sql")),
+        ("02_create_album_table.sql", include_str!("../../../migrations/02_create_album_table.sql")),
+        ("03_create_track_table.sql", include_str!("../../../migrations/03_create_track_table.sql")),
+        ("04_add_album_release_info.sql", include_str!("../../../migrations/04_add_album_release_info.sql")),
+        ("05_add_track_artist.sql", include_str!("../../../migrations/05_add_track_artist.sql")),
+        ("06_add_album_mbid_and_path.sql", include_str!("../../../migrations/06_add_album_mbid_and_path.sql")),
+        ("07_add_track_folder.sql", include_str!("../../../migrations/07_add_track_folder.sql")),
+        ("08_create_playlist_table.sql", include_str!("../../../migrations/08_create_playlist_table.sql")),
+        ("09_create_playlist_item_table.sql", include_str!("../../../migrations/09_create_playlist_item_table.sql")),
+        ("10_insert_default_playlist.sql", include_str!("../../../migrations/10_insert_default_playlist.sql")),
+    ];
 
     music_db
-        .run_migrations(&migrations_path)
+        .run_migrations(MIGRATIONS)
         .await
         .expect("failed to run library migrations - this is fatal");
 
