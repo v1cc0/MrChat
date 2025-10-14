@@ -402,9 +402,28 @@ pub async fn run() {
     };
 
     // Run migrations for library schema
-    if let Err(err) = music_db.run_migrations("./migrations").await {
-        warn!("failed to run library migrations: {:?}", err);
+    // Try to find migrations directory relative to current directory first,
+    // then try relative to executable directory
+    let migrations_path = if Path::new("./migrations").exists() {
+        PathBuf::from("./migrations")
+    } else if let Ok(exe_path) = env::current_exe() {
+        let exe_dir = exe_path.parent().expect("exe has no parent directory");
+        exe_dir.join("migrations")
+    } else {
+        PathBuf::from("./migrations")
+    };
+
+    if !migrations_path.exists() {
+        panic!(
+            "fatal: migrations directory not found at {:?} - please run from project root or ensure migrations are installed",
+            migrations_path
+        );
     }
+
+    music_db
+        .run_migrations(&migrations_path)
+        .await
+        .expect("failed to run library migrations - this is fatal");
 
     let config_path = directory.join("config.toml");
     let (app_config_value, config_source) = load_app_config(&config_path);
