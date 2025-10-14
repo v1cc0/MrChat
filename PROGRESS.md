@@ -61,6 +61,15 @@
     - 将 `query_one` + RETURNING id 改为 `execute` + `last_insert_rowid()`
     - 将 ON CONFLICT DO NOTHING 改为 DO UPDATE SET，确保冲突时也能获取 id
   - 额外修复（src/library/types.rs:219-223）：`Album::from_row` 中 release_date 从 Option<String> 改为 Option<i64>，匹配数据库中的 timestamp 存储类型
+- **修复 album.release_date 数据损坏导致的启动 panic**：
+  - 问题：应用启动时触发 "entered unreachable code: invalid value type" panic，经排查发现 13 个 album 记录的 release_date 列存储了 BLOB 图片数据而非整数时间戳
+  - 根本原因：早期版本的 album 插入代码中参数顺序与 SQL 列顺序不匹配，导致图片数据写入错误列
+  - 修复方案：执行 `UPDATE album SET release_date = NULL WHERE typeof(release_date) = 'blob'` 清理损坏数据
+  - 预防措施：使用位置参数时严格验证参数顺序与 SQL 列顺序一致
+- **实现 config.toml scan_directories 配置支持**：
+  - 修改 `src/ui/app.rs`：优先使用 config.toml 中的 `player.scan_directories`，如果为空则回退到 settings.json 中的默认路径
+  - 支持 `~/` 路径扩展：自动将 `~/music/...` 转换为绝对路径
+  - 配置生效后会在日志中输出："使用 config.toml 中的扫描路径: [...]"
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

@@ -480,8 +480,36 @@ pub async fn run() {
 
             let settings = cx.global::<SettingsGlobal>().model.read(cx);
             let playback_settings = settings.playback.clone();
+
+            // Use scan directories from config.toml if provided, otherwise fall back to settings.json
+            let scan_settings = if !app_config_for_closure.player.scan_directories.is_empty() {
+                use crate::settings::scan::ScanSettings;
+
+                let paths = app_config_for_closure
+                    .player
+                    .scan_directories
+                    .iter()
+                    .map(|p| {
+                        if p.starts_with("~/") {
+                            if let Some(home) = directories::UserDirs::new() {
+                                home.home_dir().join(&p[2..])
+                            } else {
+                                PathBuf::from(p)
+                            }
+                        } else {
+                            PathBuf::from(p)
+                        }
+                    })
+                    .collect();
+
+                info!("使用 config.toml 中的扫描路径: {:?}", paths);
+                ScanSettings { paths }
+            } else {
+                settings.scanning.clone()
+            };
+
             let mut scan_interface: ScanInterface =
-                ScanThread::start(music_db.clone(), settings.scanning.clone());
+                ScanThread::start(music_db.clone(), scan_settings);
             scan_interface.scan();
             scan_interface.start_broadcast(cx);
 
