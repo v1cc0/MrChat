@@ -70,6 +70,13 @@
   - 修改 `src/ui/app.rs`：优先使用 config.toml 中的 `player.scan_directories`，如果为空则回退到 settings.json 中的默认路径
   - 支持 `~/` 路径扩展：自动将 `~/music/...` 转换为绝对路径
   - 配置生效后会在日志中输出："使用 config.toml 中的扫描路径: [...]"
+- **清理和规范化数据库迁移文件**：
+  - 将迁移文件重命名为顺序编号（01-10），去除时间戳前缀，提升可读性
+  - 修正 `album.release_date` 数据类型：从 DATE 改为 INTEGER（Unix 时间戳），与代码实现保持一致
+  - 为所有迁移文件添加详细注释，说明表结构和字段用途
+  - 完整审查所有 `from_row` 实现（Artist, Album, Track, Playlist, PlaylistItem, TrackStats），确认类型安全
+  - 审查所有 SQL 查询文件参数顺序，验证与表结构的匹配性
+  - 测试迁移文件：在干净数据库上成功执行所有迁移，验证表结构和默认数据正确性
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

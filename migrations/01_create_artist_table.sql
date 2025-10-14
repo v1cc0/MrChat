@@ -1,3 +1,4 @@
+-- Artist table: stores music artists/bands
 CREATE TABLE IF NOT EXISTS artist (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -7,4 +8,4 @@ CREATE TABLE IF NOT EXISTS artist (
     image BLOB,
     image_mime TEXT,
     tags TEXT
-)
+);

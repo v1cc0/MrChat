@@ -1,2 +1,0 @@
--- Trigger removed: libSQL/Turso does not support CREATE TRIGGER.
--- Artist cleanup runs in application code; see ScanThread::delete_track.

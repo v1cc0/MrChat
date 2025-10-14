@@ -1,3 +1,4 @@
+-- Playlist_item table: links tracks to playlists with ordering
 CREATE TABLE IF NOT EXISTS playlist_item (
     id INTEGER PRIMARY KEY,
     playlist_id INTEGER NOT NULL,
