@@ -1,9 +1,9 @@
-use std::path::Path;
+use std::{future::Future, path::Path, time::Duration};
 
 use anyhow::{Context, Result};
 use std::fs;
 
-use smol::block_on;
+use smol::{Timer, block_on};
 use tracing::warn;
 use turso::{Connection, Database, params::IntoParams};
 use turso_core::types::FromValue;
@@ -23,9 +23,8 @@ impl TursoDatabase {
         let conn = db
             .connect()
             .context("failed to connect to turso database for pragma setup")?;
-        conn.execute("PRAGMA journal_mode = WAL", ())
-            .await
-            .context("failed to enable WAL mode")?;
+        let conn = TursoConnection { inner: conn };
+        block_on(apply_pragmas(&conn))?;
 
         Ok(Self { inner: db })
     }
@@ -35,9 +34,9 @@ impl TursoDatabase {
             .inner
             .connect()
             .context("failed to connect to turso database")?;
-        block_on(async { conn.execute("PRAGMA busy_timeout = 5000", ()).await })
-            .context("failed to set busy timeout")?;
-        Ok(TursoConnection { inner: conn })
+        let conn = TursoConnection { inner: conn };
+        block_on(apply_pragmas(&conn))?;
+        Ok(conn)
     }
 
     pub async fn run_migrations(&self, migrations_dir: impl AsRef<Path>) -> Result<()> {
@@ -239,4 +238,49 @@ impl TursoConnection {
         self.query_scalar::<i64>("SELECT last_insert_rowid()", ())
             .await
     }
+}
+
+async fn apply_pragmas(conn: &TursoConnection) -> Result<()> {
+    run_with_retry(|| async {
+        conn.query_scalar::<String>("PRAGMA journal_mode = WAL", ())
+            .await
+            .map(|_| ())
+    })
+    .await
+    .context("failed to enable WAL mode")?;
+
+    run_with_retry(|| async {
+        conn.execute("PRAGMA busy_timeout = 5000", ())
+            .await
+            .map(|_| ())
+    })
+    .await
+    .context("failed to set busy timeout")?;
+
+    Ok(())
+}
+
+async fn run_with_retry<T, F, Fut>(mut op: F) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T>>,
+{
+    const MAX_RETRIES: usize = 5;
+    for attempt in 0..=MAX_RETRIES {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(err) if is_locked(&err) && attempt < MAX_RETRIES => {
+                let delay = Duration::from_millis(50 * (attempt as u64 + 1));
+                Timer::after(delay).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    unreachable!("retry loop should return on success or error")
+}
+
+fn is_locked(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| cause.to_string().contains("database is locked"))
 }
