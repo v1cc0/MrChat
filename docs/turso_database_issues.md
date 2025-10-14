@@ -157,3 +157,258 @@ SELECT id, title, typeof(release_date) FROM album LIMIT 10;
 
 ### 相关 Commits
 - `c480ac1` - Fix turso crate Option parameter binding panic in album insertion (2025-10-15)
+
+---
+
+## Turso 混合类型参数绑定 Bug（2025-10-15）
+
+> **严重度：CRITICAL** - 影响所有混合类型参数的插入操作，导致数据损坏
+
+### 问题发现
+
+在修复 Option 参数绑定问题后，进一步测试发现 turso crate 0.2.2 存在更严重的参数绑定缺陷：**无法可靠处理混合类型的元组参数**。
+
+### 源代码调查
+
+对 turso 和 turso_core 源代码进行了深入分析：
+
+**turso crate (v0.2.2) - params.rs**：
+```rust
+// 使用宏生成 1-16 参数的 tuple 实现
+macro_rules! tuple_into_params {
+    ($count:literal : $(($field:tt $ftype:ident)),* $(,)?) => {
+        impl<$($ftype,)*> IntoParams for ($($ftype,)*)
+        where $($ftype: IntoValue,)* {
+            fn into_params(self) -> Result<Params> {
+                let params = Params::Positional(vec![$(self.$field.into_value()?),*]);
+                Ok(params)
+            }
+        }
+    }
+}
+```
+
+**turso crate - value.rs**：
+```rust
+impl From<Vec<u8>> for Value {
+    fn from(value: Vec<u8>) -> Value {
+        Value::Blob(value)  // 看起来正确
+    }
+}
+```
+
+**turso_core (v0.2.2) - types.rs**：
+```rust
+#[derive(Debug, Clone)]
+pub enum Value {
+    Null,
+    Integer(i64),
+    Float(f64),
+    Text(Text),
+    Blob(Vec<u8>),
+}
+```
+
+**结论**：从代码层面看实现正确，但实际运行时参数绑定存在严重 bug。
+
+### Bug #1: BLOB + 其他类型混合导致参数错位
+
+**症状**：
+```rust
+// ❌ 参数顺序完全打乱
+conn.execute(
+    "INSERT INTO album (title, artist_id, release_date, image, thumb, label, mbid) VALUES ...",
+    (
+        album_title,        // String
+        artist_id,          // i64
+        release_date,       // i64
+        image_data,         // Vec<u8> - BLOB
+        thumbnail,          // Vec<u8> - BLOB
+        label,              // String
+        mbid,              // String
+    ),
+).await?;
+```
+
+**实际后果**：
+- `release_date` (INTEGER 列) 被写入了 BLOB 图片数据
+- 数据库查询：`SELECT typeof(release_date) FROM album` 返回 `blob`
+- 其他字段也可能错位
+
+**验证方法**：
+```bash
+sqlite3 ~/.local/share/mrchat/music.db << 'EOF'
+SELECT id, title, typeof(release_date), length(image), length(thumb)
+FROM album LIMIT 5;
+EOF
+# 期望：typeof(release_date) = 'integer' 或 'null'
+# 实际（bug）：typeof(release_date) = 'blob'
+```
+
+**Workaround（已实现）**：
+```rust
+// ✅ 分两步：先插入非BLOB字段，后UPDATE BLOB字段
+// Step 1: 仅String和i64参数
+let insert_sql = "INSERT INTO album (title, title_sortable, artist_id, release_date, label, catalog_number, isrc, mbid)
+    VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?)";
+conn.execute(insert_sql, (title, title_sort, artist_id, date, label, catalog, isrc, mbid)).await?;
+
+let id = conn.query_scalar::<i64>("SELECT last_insert_rowid()", ()).await?;
+
+// Step 2: 单独UPDATE BLOB字段
+if resized_image.is_some() || thumb.is_some() {
+    let update_sql = "UPDATE album SET image = CASE WHEN length(?) = 0 THEN NULL ELSE ? END,
+                                        thumb = CASE WHEN length(?) = 0 THEN NULL ELSE ? END
+                      WHERE id = ?";
+    conn.execute(update_sql, (image.clone(), image, thumb.clone(), thumb, id)).await?;
+}
+```
+
+**结果**：✅ Album 插入成功（49 albums）
+
+### Bug #2: String + i64 混合导致参数错位
+
+**症状**：即使不包含 BLOB，混合 String 和 i64 类型也会导致参数错位。
+
+**测试案例 1 - 8 参数（4 String + 4 i64）**：
+```rust
+// ❌ 失败 - location显示为数字
+conn.execute(
+    "INSERT INTO track (title, title_sortable, location, album_id, track_number, disc_number, duration, folder)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    (
+        name.clone(),       // String - $1
+        name.clone(),       // String - $2
+        path_str.clone(),   // String - $3
+        album_id,           // i64 - $4
+        track_num,          // i64 - $5
+        disc_num,           // i64 - $6
+        duration,           // i64 - $7
+        folder,             // String - $8
+    ),
+).await?;
+```
+
+**实际后果**：
+```sql
+SELECT id, title, location, duration FROM track LIMIT 3;
+-- 期望：location = "/home/vc/music/..."
+-- 实际：location = "355"  (实际是duration的值！)
+```
+
+**测试案例 2 - 4 参数（3 String + 1 i64 at end）**：
+```rust
+// ❌ 仍然失败
+conn.execute(
+    "INSERT INTO track (title, title_sortable, location, duration) VALUES ($1, $2, $3, $4)",
+    (
+        name.clone(),       // String - $1
+        name.clone(),       // String - $2
+        path_str.clone(),   // String - $3
+        duration,           // i64 - $4 (只有一个i64，放在最后)
+    ),
+).await?;
+```
+
+**结果**：❌ 仍然参数错位，0 tracks 插入成功
+
+**尝试的其他组合**：
+- 全 String 参数，i64 用 SQL 字面值 → 未测试（但应该会牺牲性能和安全性）
+- 完全分离类型到不同 SQL 语句 → 正在尝试
+
+### 根本问题分析
+
+**推测的原因**：
+1. turso_core 的参数绑定实现在处理不同类型时存在内存布局或序列化问题
+2. 可能与类型的内存大小不一致有关（String 是指针+长度，i64 是固定8字节）
+3. 元组参数的序列化/反序列化过程中类型信息丢失或错位
+
+**影响范围**：
+- ✅ 纯 String 参数 - 可能正常
+- ✅ 纯 i64 参数 - 可能正常
+- ❌ String + i64 混合 - 错位
+- ❌ BLOB + 任何类型 - 严重错位
+
+### 当前状态总结
+
+| 操作 | 参数类型 | 状态 | 记录数 |
+|------|---------|------|--------|
+| insert_artist | 2 String | ✅ 成功 | 42 artists |
+| insert_album (基本字段) | 8 混合 (String + i64) | ⚠️ 用 workaround | 49 albums |
+| insert_album (BLOB字段) | 4 Vec<u8> + 1 i64 | ⚠️ 用 workaround | 49 albums |
+| insert_track | 8 混合 (String + i64) | ❌ 失败 | 0 tracks |
+
+### 建议的解决路径
+
+#### 短期方案（紧急）：
+1. **完全避免混合类型参数**
+   ```rust
+   // Step 1: 仅 String 参数
+   conn.execute("INSERT INTO track (title, location, folder) VALUES (?, ?, ?)",
+                (title, location, folder)).await?;
+
+   // Step 2: 仅 i64 参数（WHERE 用字面值）
+   let update_sql = format!("UPDATE track SET album_id = ?, duration = ? WHERE location = '{}'",
+                            location.replace("'", "''"));
+   conn.execute(&update_sql, (album_id, duration)).await?;
+   ```
+
+2. **使用 SQL 字面值（安全性需注意）**
+   ```rust
+   let sql = format!("INSERT INTO track (...) VALUES ('{}', {}, {})",
+                     title.replace("'", "''"), album_id, duration);
+   conn.execute(&sql, ()).await?;
+   ```
+
+#### 中期方案：
+1. **提交 Issue 到 turso 项目**
+   - Repository: https://github.com/tursodatabase/turso-client-rust
+   - 包含最小可复现示例
+   - 附上本文档的调查结果
+
+2. **寻找替代方案**
+   - 考虑使用标准 `rusqlite` + Turso embedded replica
+   - 或使用 HTTP API 而非本地 embedded
+
+#### 长期方案：
+1. 等待官方修复
+2. 或考虑贡献 PR 修复 turso_core 的参数绑定实现
+
+### 数据完整性检查清单
+
+修复后必须执行：
+```bash
+# 1. 删除旧数据库
+rm -f ~/.local/share/mrchat/music.db{,-wal,-shm}
+rm -f ~/.local/share/mrchat/scan_record.json
+
+# 2. 重新扫描
+cargo run --release
+
+# 3. 验证数据
+sqlite3 ~/.local/share/mrchat/music.db << 'EOF'
+-- 检查 artists
+SELECT COUNT(*) FROM artist;
+
+-- 检查 albums（不应有 blob 类型的 release_date）
+SELECT COUNT(*) FROM album;
+SELECT id, title, typeof(release_date), typeof(image), typeof(thumb)
+FROM album LIMIT 5;
+
+-- 检查 tracks（location 应为完整路径字符串）
+SELECT COUNT(*) FROM track;
+SELECT id, title, substr(location, 1, 30), duration, album_id
+FROM track LIMIT 5;
+EOF
+```
+
+### 相关 Commits
+- `f6a4b9e` - Fix turso crate parameter binding bugs (2025-10-15)
+  - 实现 album BLOB workaround（成功）
+  - 尝试多种 track 混合类型 workaround（失败）
+  - 详细记录调查过程
+
+### 参考资料
+- turso-client-rust: https://github.com/tursodatabase/turso-client-rust
+- turso_core params.rs: https://github.com/tursodatabase/turso-client-rust/blob/main/crates/core/src/params.rs
+- 相关讨论（待创建 issue）
