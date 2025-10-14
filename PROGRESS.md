@@ -84,19 +84,25 @@
     - 从 `Album` 结构体删除 `image_mime` 字段，添加 `mbid` 字段
     - 修复 `Album::from_row` 以正确读取列顺序：跳过位置 8 的 `tags`（暂不解析），读取位置 12 的 `mbid`
   - 预防措施：使用 `SELECT *` 时必须严格匹配表的实际列顺序
-- **发现 turso crate 0.2.2 严重参数绑定 bug**：
+- **完全解决 turso crate 0.2.2 参数绑定 bug**：
   - **Bug 1: 无法混合 Vec<u8> (BLOB) 与其他类型**：元组参数中包含 BLOB 和其他类型时，参数顺序会被打乱，导致数据写入错误的列
     - 表现：album.release_date (INTEGER) 被写入 BLOB 图片数据
-    - Workaround (src/library/scan.rs:210-284)：分两步插入 album — Step 1 插入非 BLOB 字段，Step 2 单独 UPDATE BLOB 字段
+    - Workaround (src/library/scan.rs:427-583)：分两步插入 album — Step 1 插入非 BLOB 字段，Step 2 单独 UPDATE BLOB 字段
+    - 结果：✅ album 插入成功（49 albums）
   - **Bug 2: 无法混合 String 与 i64 类型**：即使只有 3 String + 1 i64 的组合也会导致参数打乱
     - 表现：track.location 显示为数字（实际是 duration 的值），说明参数顺序错乱
     - 尝试的 Workarounds：
-      - 8 参数 (4 String + 4 i64) → 失败，参数完全打乱
-      - 3 String + 1 i64 → 仍然失败
-    - **当前状态**：album 插入成功（49 albums），track 插入失败（0 tracks）
-    - **需要**：进一步测试是否可以完全避免混合类型，或寻找其他 workaround 策略
+      - 分 3 步：Step 1 只插入 String 字段，Step 2 更新 i64 字段，Step 3 更新更多 String 字段 → 失败，0 tracks
+      - 调整参数顺序、减少参数数量 → 所有方案均失败
+    - **最终解决方案（src/library/scan.rs:201-205, 653-697）**：
+      - **完全放弃参数绑定**，使用 SQL 字面值（literal values）
+      - 添加 `sql_escape()` 辅助函数处理单引号转义，防止 SQL 注入
+      - 将所有参数值直接 format 到 SQL 字符串中：`INSERT INTO track (...) VALUES ('{}', {}, ...)`
+      - 调用 `conn.execute(&sql, ())` 执行，不传递任何绑定参数
+    - 结果：✅ **track 插入完全成功**，所有字段数据正确（包括日文字符、路径、整数）
   - **根本问题**：turso crate 0.2.2 的参数绑定实现存在严重 bug，无法可靠处理混合类型的元组参数
-  - **建议**：考虑向 turso 项目提交 issue，或寻找替代的 libSQL Rust 客户端
+  - **性能考量**：SQL 字面值方式稍慢于参数绑定，但在音乐库扫描场景下影响可忽略（单次扫描仅发生一次）
+  - **长期建议**：考虑向 turso 项目提交 issue，或在 turso crate 修复后恢复参数绑定以提升性能
 
 ## 待办
 - 丰富聊天域模型细节（上下文截断策略、消息元数据）并串联 Turso DAO。

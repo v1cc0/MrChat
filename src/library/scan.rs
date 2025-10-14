@@ -198,6 +198,12 @@ fn is_db_locked(err: &anyhow::Error) -> bool {
         .any(|cause| cause.to_string().contains("database is locked"))
 }
 
+/// Escape a string for use as a SQL string literal
+/// Replaces single quotes with two single quotes (SQL standard escaping)
+fn sql_escape(s: &str) -> String {
+    s.replace("'", "''")
+}
+
 impl ScanThread {
     pub fn start(pool: TursoDatabase, settings: ScanSettings) -> ScanInterface {
         let (commands_tx, commands_rx) = async_channel::bounded(10);
@@ -645,71 +651,48 @@ impl ScanThread {
         let artist = metadata.artist.as_deref().unwrap_or("");
 
         // WORKAROUND for turso crate 0.2.2 bug:
-        // Cannot handle mixed String/i64 types in tuple - parameters get scrambled
-        // Solution: Insert minimum required fields with ONE i64 at the end, then UPDATE remaining fields
+        // The crate cannot reliably handle mixed types (String + i64) in parameter binding
+        // Solution: Use SQL literal values entirely - NO PARAMETER BINDING AT ALL
+        // This is slower but guaranteed to work around the turso crate bug
 
-        // Step 1: Insert required NOT NULL fields (3 String + 1 i64)
-        // Test if single i64 at end works - if not, will need to use literal value in SQL
-        let insert_sql = "INSERT INTO track (title, title_sortable, location, duration)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (location) DO UPDATE SET
-                title = EXCLUDED.title,
-                title_sortable = EXCLUDED.title_sortable,
-                duration = EXCLUDED.duration";
+        // Escape all string values for SQL injection safety
+        let name_escaped = sql_escape(&name);
+        let path_escaped = sql_escape(&path_str);
+        let parent_escaped = sql_escape(parent_str);
+        let genre_escaped = sql_escape(genre);
+        let artist_escaped = sql_escape(artist);
 
-        conn.execute(
-            insert_sql,
-            (
-                name.clone(),               // String - $1
-                name.clone(),               // String - $2
-                path_str.clone(),           // String - $3
-                length as i64,              // i64 - $4 (ONLY ONE i64, at the END)
-            ),
-        )
-        .await
-        .with_context(|| {
-            format!("failed to insert track: location={:?}", path_str)
-        })?;
-
-        // Step 2: Update ONLY i64 fields (3 i64 parameters + String WHERE in SQL literal)
-        let update_int_sql = format!(
-            "UPDATE track SET album_id = ?, track_number = ?, disc_number = ? WHERE location = '{}'",
-            path_str.replace("'", "''")  // Escape single quotes
+        // Single INSERT with all values as SQL literals
+        let insert_sql = format!(
+            "INSERT INTO track (title, title_sortable, album_id, track_number, disc_number, duration, location, genres, artist_names, folder)
+                VALUES ('{}', '{}', {}, {}, {}, {}, '{}', '{}', '{}', '{}')
+                ON CONFLICT (location) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    title_sortable = EXCLUDED.title_sortable,
+                    album_id = EXCLUDED.album_id,
+                    track_number = EXCLUDED.track_number,
+                    disc_number = EXCLUDED.disc_number,
+                    duration = EXCLUDED.duration,
+                    genres = EXCLUDED.genres,
+                    artist_names = EXCLUDED.artist_names,
+                    folder = EXCLUDED.folder",
+            name_escaped,           // title
+            name_escaped,           // title_sortable
+            album_id_unwrapped,     // album_id
+            track_num,              // track_number
+            disc_num,               // disc_number
+            length as i64,          // duration
+            path_escaped,           // location
+            genre_escaped,          // genres
+            artist_escaped,         // artist_names
+            parent_escaped          // folder
         );
 
-        conn.execute(
-            &update_int_sql,
-            (
-                album_id_unwrapped,         // i64 - $1
-                track_num,                  // i64 - $2
-                disc_num,                   // i64 - $3
-            ),
-        )
-        .await
-        .with_context(|| {
-            format!("failed to update track integer fields")
-        })?;
-
-        // Step 3: Update String fields (folder + genres + artist_names, 4 String parameters)
-        let update_str_sql = "UPDATE track SET
-            folder = $1,
-            genres = $2,
-            artist_names = $3
-            WHERE location = $4";
-
-        conn.execute(
-            update_str_sql,
-            (
-                parent_str.to_string(),     // String - $1
-                genre.to_string(),          // String - $2
-                artist.to_string(),         // String - $3
-                path_str,                   // String - $4
-            ),
-        )
-        .await
-        .with_context(|| {
-            format!("failed to update track string fields")
-        })?;
+        conn.execute(&insert_sql, ())
+            .await
+            .with_context(|| {
+                format!("failed to insert track using literal values: location={:?}", path_str)
+            })?;
 
         Ok(())
     }
